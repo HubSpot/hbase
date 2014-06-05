@@ -20,37 +20,25 @@
 
 package org.apache.hadoop.hbase.ipc;
 
-import java.lang.reflect.Proxy;
-import java.lang.reflect.Method;
-import java.lang.reflect.Array;
-import java.lang.reflect.InvocationHandler;
-import java.lang.reflect.InvocationTargetException;
-
-import java.net.InetSocketAddress;
-import java.io.*;
-import java.util.Map;
-import java.util.HashMap;
-
-import javax.net.SocketFactory;
-
-import org.apache.commons.logging.*;
-
-import org.apache.hadoop.hbase.HRegionInfo;
-import org.apache.hadoop.hbase.client.Operation;
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
+import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.client.UserProvider;
 import org.apache.hadoop.hbase.io.HbaseObjectWritable;
 import org.apache.hadoop.hbase.monitoring.MonitoredRPCHandler;
 import org.apache.hadoop.hbase.regionserver.HRegionServer;
-import org.apache.hadoop.hbase.util.Bytes;
-import org.apache.hadoop.hbase.util.Objects;
-import org.apache.hadoop.io.*;
-import org.apache.hadoop.ipc.RPC;
-import org.apache.hadoop.hbase.ipc.VersionedProtocol;
 import org.apache.hadoop.hbase.security.User;
+import org.apache.hadoop.hbase.util.Objects;
+import org.apache.hadoop.io.Writable;
+import org.apache.hadoop.ipc.RPC;
 import org.apache.hadoop.security.authorize.ServiceAuthorizationManager;
-import org.apache.hadoop.conf.*;
-
 import org.codehaus.jackson.map.ObjectMapper;
+
+import java.io.IOException;
+import java.lang.reflect.*;
+import java.net.InetSocketAddress;
+import java.util.HashMap;
+import java.util.Map;
 
 /** An RpcEngine implementation for Writable data. */
 class WritableRpcEngine implements RpcEngine {
@@ -409,33 +397,22 @@ class WritableRpcEngine implements RpcEngine {
       responseInfo.put("client", clientAddress);
       responseInfo.put("class", instance.getClass().getSimpleName());
       responseInfo.put("method", call.getMethodName());
-      if (params.length == 2 && instance instanceof HRegionServer &&
-          params[0] instanceof byte[] &&
-          params[1] instanceof Operation) {
-        // if the slow process is a query, we want to log its table as well 
-        // as its own fingerprint
-        byte [] tableName =
-          HRegionInfo.parseRegionName((byte[]) params[0])[0];
-        responseInfo.put("table", Bytes.toStringBinary(tableName));
-        // annotate the response map with operation details
-        responseInfo.putAll(((Operation) params[1]).toMap());
-        // report to the log file
-        LOG.warn("(operation" + tag + "): " +
-            mapper.writeValueAsString(responseInfo));
-      } else if (params.length == 1 && instance instanceof HRegionServer &&
-          params[0] instanceof Operation) {
-        // annotate the response map with operation details
-        responseInfo.putAll(((Operation) params[0]).toMap());
-        // report to the log file
-        LOG.warn("(operation" + tag + "): " +
-            mapper.writeValueAsString(responseInfo));
+      if (instance instanceof HRegionServer) {
+        HRegionServer regionServer = (HRegionServer) instance;
+        Map<String, Object> callDetails = regionServer.getCallDetails(call, params);
+        if (!callDetails.isEmpty()) {
+          responseInfo.putAll(callDetails);
+        } else {
+          responseInfo.put("call", call.toString());
+        }
       } else {
         // can't get JSON details, so just report call.toString() along with 
         // a more generic tag.
         responseInfo.put("call", call.toString());
-        LOG.warn("(response" + tag + "): " +
-            mapper.writeValueAsString(responseInfo));
       }
+
+      LOG.warn("(response" + tag + "): " +
+          mapper.writeValueAsString(responseInfo));
     }
   }
 
