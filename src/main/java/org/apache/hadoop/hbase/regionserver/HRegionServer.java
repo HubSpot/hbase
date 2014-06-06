@@ -4129,7 +4129,8 @@ public class HRegionServer implements HRegionInterface, HBaseRPCErrorHandler,
     } else if (params.length == 1 && params[0] instanceof Operation) {
       // annotate the response map with operation details
       responseInfo.putAll(((Operation) params[0]).toMap());
-    } else if (params.length == 2 && params[0] instanceof Long && params[1] instanceof Integer) {
+    } else if (params.length == 2 && params[0] instanceof Long && params[1] instanceof Integer &&
+        scanners.containsKey(params[0])) {
       RegionScanner regionScanner = scanners.get(params[0]);
       HRegionInfo regionInfo = regionScanner.getRegionInfo();
       responseInfo.put("table", regionInfo.getTableNameAsString());
