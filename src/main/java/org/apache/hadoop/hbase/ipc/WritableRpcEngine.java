@@ -73,7 +73,7 @@ class WritableRpcEngine implements RpcEngine {
       }
 
       HbaseObjectWritable value = (HbaseObjectWritable)
-        client.call(new Invocation(method, protocol, args), address,
+        client.call(new Invocation(method, protocol, args, client.conf), address,
                     protocol, ticket, rpcTimeout);
       if (logDebug) {
         // FIGURE HOW TO TURN THIS OFF!
@@ -151,7 +151,7 @@ class WritableRpcEngine implements RpcEngine {
 
     Invocation[] invocations = new Invocation[params.length];
     for (int i = 0; i < params.length; i++) {
-      invocations[i] = new Invocation(method, protocol, params[i]);
+      invocations[i] = new Invocation(method, protocol, params[i], conf);
     }
 
     Writable[] wrappedValues =

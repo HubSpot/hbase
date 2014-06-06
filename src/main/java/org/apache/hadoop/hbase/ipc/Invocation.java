@@ -19,9 +19,12 @@
  */
 package org.apache.hadoop.hbase.ipc;
 
+import com.google.common.base.Strings;
+import org.apache.commons.lang.ArrayUtils;
 import org.apache.hadoop.conf.Configurable;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.io.HbaseObjectWritable;
+import org.apache.hadoop.hbase.ipc.writables.ClientSignature;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.io.VersionMismatchException;
 import org.apache.hadoop.io.VersionedWritable;
@@ -34,6 +37,8 @@ import java.lang.reflect.Method;
 
 /** A method invocation, including the method name and its parameters.*/
 public class Invocation extends VersionedWritable implements Configurable {
+  private static final String CLIENT_SIGNATURE_CONF = "hbase.invocation.client.signature";
+
   protected String methodName;
   @SuppressWarnings("rawtypes")
   protected Class[] parameterClasses;
@@ -41,13 +46,14 @@ public class Invocation extends VersionedWritable implements Configurable {
   protected Configuration conf;
   private long clientVersion;
   private int clientMethodsHash;
+  private String clientSignature;
 
   private static byte RPC_VERSION = 1;
 
   public Invocation() {}
 
   public Invocation(Method method,
-      Class<? extends VersionedProtocol> declaringClass, Object[] parameters) {
+      Class<? extends VersionedProtocol> declaringClass, Object[] parameters, Configuration conf) {
     this.methodName = method.getName();
     this.parameterClasses = method.getParameterTypes();
     this.parameters = parameters;
@@ -68,6 +74,8 @@ public class Invocation extends VersionedWritable implements Configurable {
       this.clientMethodsHash = ProtocolSignature.getFingerprint(
           declaringClass.getMethods());
     }
+
+    clientSignature = conf.get(CLIENT_SIGNATURE_CONF, "");
   }
 
   /** @return The name of the method invoked. */
@@ -88,6 +96,9 @@ public class Invocation extends VersionedWritable implements Configurable {
     return clientMethodsHash;
   }
 
+  public String getClientSignature() {
+    return clientSignature;
+  }
   /**
    * Returns the rpc version used by the client.
    * @return rpcVersion
@@ -128,6 +139,12 @@ public class Invocation extends VersionedWritable implements Configurable {
         this.conf);
       parameterClasses[i] = objectWritable.getDeclaredClass();
     }
+
+    if (parameters.length > 0 && parameters[0] instanceof ClientSignature) {
+      clientSignature = Strings.nullToEmpty(((ClientSignature) parameters[0]).getSignature());
+      parameters = ArrayUtils.subarray(parameters, 1, parameters.length);
+      parameterClasses = (Class[]) ArrayUtils.subarray(parameterClasses, 1, parameterClasses.length);
+    }
   }
 
   public void write(DataOutput out) throws IOException {
@@ -135,7 +152,8 @@ public class Invocation extends VersionedWritable implements Configurable {
     out.writeUTF(this.methodName);
     out.writeLong(clientVersion);
     out.writeInt(clientMethodsHash);
-    out.writeInt(parameterClasses.length);
+    out.writeInt(parameterClasses.length + 1);
+    HbaseObjectWritable.writeObject(out, new ClientSignature(clientSignature), ClientSignature.class, conf);
     for (int i = 0; i < parameterClasses.length; i++) {
       HbaseObjectWritable.writeObject(out, parameters[i], parameterClasses[i],
                                  conf);
@@ -159,9 +177,14 @@ public class Invocation extends VersionedWritable implements Configurable {
     buffer.append(", rpc version="+RPC_VERSION);
     buffer.append(", client version="+clientVersion);
     buffer.append(", methodsFingerPrint="+clientMethodsHash);
+    buffer.append(", clientSignature="+clientSignature);
+
     return buffer.toString();
   }
 
+  /**
+   * Sets the configuration on this instance, and fills in the value of {@value #CLIENT_SIGNATURE_CONF} into clientSignature
+   */
   public void setConf(Configuration conf) {
     this.conf = conf;
   }
