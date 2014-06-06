@@ -182,9 +182,6 @@ public class Invocation extends VersionedWritable implements Configurable {
     return buffer.toString();
   }
 
-  /**
-   * Sets the configuration on this instance, and fills in the value of {@value #CLIENT_SIGNATURE_CONF} into clientSignature
-   */
   public void setConf(Configuration conf) {
     this.conf = conf;
   }
