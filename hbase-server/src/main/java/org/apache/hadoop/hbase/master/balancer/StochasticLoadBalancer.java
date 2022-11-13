@@ -132,6 +132,7 @@ public class StochasticLoadBalancer extends BaseLoadBalancer {
   protected static final String COST_FUNCTIONS_COST_FUNCTIONS_KEY =
           "hbase.master.balancer.stochastic.additionalCostFunctions";
   public static final String OVERALL_COST_FUNCTION_NAME = "Overall";
+  public static final String WIGHTED_IMBALANCE_COST_NAME = "Imbalance";
 
   protected static final Random RANDOM = new Random(System.currentTimeMillis());
   private static final Logger LOG = LoggerFactory.getLogger(StochasticLoadBalancer.class);
@@ -323,7 +324,7 @@ public class StochasticLoadBalancer extends BaseLoadBalancer {
     initCosts(cluster);
     curOverallCost = computeCost(cluster, Double.MAX_VALUE);
     System.arraycopy(tempFunctionCosts, 0, curFunctionCosts, 0, curFunctionCosts.length);
-    updateStochasticCosts(tableName, curOverallCost, curFunctionCosts);
+    updateStochasticCosts(tableName, curOverallCost, curOverallCost/sumMultiplier, curFunctionCosts);
   }
 
   @Override
@@ -424,7 +425,7 @@ public class StochasticLoadBalancer extends BaseLoadBalancer {
   @InterfaceAudience.Private
   Cluster.Action nextAction(Cluster cluster) {
     return candidateGenerators.get(RANDOM.nextInt(candidateGenerators.size()))
-            .generate(cluster);
+          .generate(cluster);
   }
 
   /**
@@ -480,7 +481,7 @@ public class StochasticLoadBalancer extends BaseLoadBalancer {
     double currentCost = computeCost(cluster, Double.MAX_VALUE);
     curOverallCost = currentCost;
     System.arraycopy(tempFunctionCosts, 0, curFunctionCosts, 0, curFunctionCosts.length);
-    updateStochasticCosts(tableName, curOverallCost, curFunctionCosts);
+    updateStochasticCosts(tableName, curOverallCost, curOverallCost / sumMultiplier, curFunctionCosts);
     double initCost = currentCost;
     double newCost;
 
@@ -505,12 +506,13 @@ public class StochasticLoadBalancer extends BaseLoadBalancer {
       }
     }
     LOG.info("Start StochasticLoadBalancer.balancer, initial weighted average imbalance={}," +
-        " functionCost={} computedMaxSteps={}",
-      currentCost / sumMultiplier, functionCost(), computedMaxSteps);
+        " sumMultiplier={} sumCost={} functionCost={} computedMaxSteps={}",
+      currentCost / sumMultiplier, sumMultiplier, currentCost, functionCost(), computedMaxSteps);
 
     final String initFunctionTotalCosts = totalCostsPerFunc();
     // Perform a stochastic walk to see if we can get a good fit.
     long step;
+    int moveCostLogCounter = 0;
 
     for (step = 0; step < computedMaxSteps; step++) {
       Cluster.Action action = nextAction(cluster);
@@ -532,6 +534,10 @@ public class StochasticLoadBalancer extends BaseLoadBalancer {
         curOverallCost = currentCost;
         System.arraycopy(tempFunctionCosts, 0, curFunctionCosts, 0, curFunctionCosts.length);
       } else {
+        //LOG hidden move cost if greatly impacting ability to find better plan
+        logMoveCosts(newCost, tempFunctionCosts, moveCostLogCounter);
+        moveCostLogCounter++;
+
         // Put things back the way they were before.
         // TODO: undo by remembering old values
         Action undoAction = action.undoAction();
@@ -548,7 +554,7 @@ public class StochasticLoadBalancer extends BaseLoadBalancer {
     metricsBalancer.balanceCluster(endTime - startTime);
 
     if (initCost > currentCost) {
-      updateStochasticCosts(tableName, curOverallCost, curFunctionCosts);
+      updateStochasticCosts(tableName, curOverallCost, curOverallCost / sumMultiplier, curFunctionCosts);
       plans = createRegionPlans(cluster);
       LOG.info("Finished computing new moving plan. Computation took {} ms" +
           " to try {} different iterations.  Found a solution that moves " +
@@ -560,9 +566,11 @@ public class StochasticLoadBalancer extends BaseLoadBalancer {
       sendRegionPlansToRingBuffer(plans, currentCost, initCost, initFunctionTotalCosts, step);
       return plans;
     }
+
     LOG.info("Could not find a better moving plan.  Tried {} different configurations in "
-        + "{} ms, and did not find anything with an imbalance score less than {}", step,
+        + "{} ms, and did not find anything with an imbalance score less than {}.", step,
       endTime - startTime, initCost / sumMultiplier);
+
     return null;
   }
 
@@ -604,10 +612,30 @@ public class StochasticLoadBalancer extends BaseLoadBalancer {
     }
   }
 
+  private void logMoveCosts(double currentCost, double [] currentFunctionCosts, int logCount){
+    if (logCount > 5){
+      // no op - so as to not flood the logs
+      return;
+    }
+    for (int i = 0; i < costFunctions.size(); i++) {
+      CostFunction costFunction = costFunctions.get(i);
+      if (costFunction instanceof MoveCostFunction){
+        String costFunctionName = costFunction.getClass().getSimpleName();
+        double moveCost = currentFunctionCosts[i];
+        double costPercent = (currentCost == 0) ? 0 : (moveCost/ currentCost) * 100;
+        if (costPercent > .50 ){
+          LOG.info("{} may be impacting the ability to find an improved plan. calculatedMoveCost={} percentageOfPlanCost={}%. Consider lowering moveCost multiplier.", costFunctionName, moveCost, costPercent );
+          break;
+        }
+      }
+
+    }
+  }
   /**
    * update costs to JMX
    */
-  private void updateStochasticCosts(TableName tableName, double overall, double[] subCosts) {
+  private void updateStochasticCosts(TableName tableName, double overall, double weightedImbalance, double[] subCosts) {
+
     if (tableName == null) {
       return;
     }
@@ -619,7 +647,11 @@ public class StochasticLoadBalancer extends BaseLoadBalancer {
       balancer.updateStochasticCost(tableName.getNameAsString(),
         OVERALL_COST_FUNCTION_NAME, "Overall cost", overall);
 
-      // each cost function
+      // weighted imbalance
+      balancer.updateStochasticCost(tableName.getNameAsString(),
+        WIGHTED_IMBALANCE_COST_NAME, "Weighted imbalance", weightedImbalance);
+
+      // each cost function as a percent of overall cost
       for (int i = 0; i < costFunctions.size(); i++) {
         CostFunction costFunction = costFunctions.get(i);
         String costFunctionName = costFunction.getClass().getSimpleName();

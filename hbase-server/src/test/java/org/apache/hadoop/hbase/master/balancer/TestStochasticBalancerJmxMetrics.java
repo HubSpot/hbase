@@ -18,7 +18,6 @@
 package org.apache.hadoop.hbase.master.balancer;
 
 import static org.junit.Assert.assertTrue;
-
 import java.io.IOException;
 import java.util.HashSet;
 import java.util.Hashtable;
@@ -51,7 +50,6 @@ import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.ClassRule;
 import org.junit.FixMethodOrder;
-import org.junit.Ignore;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
 import org.junit.runners.MethodSorters;
@@ -60,7 +58,6 @@ import org.slf4j.LoggerFactory;
 
 @Category({ MiscTests.class, MediumTests.class })
 @FixMethodOrder(MethodSorters.NAME_ASCENDING)
-@Ignore
 public class TestStochasticBalancerJmxMetrics extends BalancerTestBase {
 
   @ClassRule
@@ -130,6 +127,7 @@ public class TestStochasticBalancerJmxMetrics extends BalancerTestBase {
    */
   @Test
   public void testJmxMetrics_EnsembleMode() throws Exception {
+
     loadBalancer = new StochasticLoadBalancer();
 
     conf.setBoolean(HConstants.HBASE_MASTER_LOADBALANCE_BYTABLE, false);
@@ -141,11 +139,12 @@ public class TestStochasticBalancerJmxMetrics extends BalancerTestBase {
 
     String[] tableNames = new String[] { tableName.getNameAsString() };
     String[] functionNames = loadBalancer.getCostFunctionNames();
-    Set<String> jmxMetrics = readJmxMetricsWithRetry();
+
+    Set<String> jmxMetrics = readJmxMetricsWithRetry(functionNames.length + 1);
     Set<String> expectedMetrics = getExpectedJmxMetrics(tableNames, functionNames);
 
-    // printMetrics(jmxMetrics, "existing metrics in ensemble mode");
-    // printMetrics(expectedMetrics, "expected metrics in ensemble mode");
+     printMetrics(jmxMetrics, "existing metrics in ensemble mode");
+     printMetrics(expectedMetrics, "expected metrics in ensemble mode");
 
     // assert that every expected is in the JMX
     for (String expected : expectedMetrics) {
@@ -159,6 +158,7 @@ public class TestStochasticBalancerJmxMetrics extends BalancerTestBase {
    */
   @Test
   public void testJmxMetrics_PerTableMode() throws Exception {
+
     loadBalancer = new StochasticLoadBalancer();
 
     conf.setBoolean(HConstants.HBASE_MASTER_LOADBALANCE_BYTABLE, true);
@@ -166,9 +166,10 @@ public class TestStochasticBalancerJmxMetrics extends BalancerTestBase {
 
     // NOTE the size is normally set in setClusterMetrics, for test purpose, we set it manually
     // Tables: hbase:namespace, table1, table2
-    // Functions: costFunctions, overall
+    // Functions: costFunctions, overall, imbalance
     String[] functionNames = loadBalancer.getCostFunctionNames();
-    loadBalancer.updateMetricsSize(3 * (functionNames.length + 1));
+
+    loadBalancer.updateMetricsSize(3 * (functionNames.length + 2));
 
     // table 1
     TableName tableName = TableName.valueOf(TABLE_NAME_1);
@@ -180,17 +181,19 @@ public class TestStochasticBalancerJmxMetrics extends BalancerTestBase {
     clusterState = mockClusterServers(mockCluster_pertable_2);
     loadBalancer.balanceTable(tableName, clusterState);
 
+
     // table hbase:namespace
     tableName = TableName.valueOf(TABLE_NAME_NAMESPACE);
     clusterState = mockClusterServers(mockCluster_pertable_namespace);
     loadBalancer.balanceTable(tableName, clusterState);
 
+
     String[] tableNames = new String[] { TABLE_NAME_1, TABLE_NAME_2, TABLE_NAME_NAMESPACE };
-    Set<String> jmxMetrics = readJmxMetricsWithRetry();
+    Set<String> jmxMetrics = readJmxMetricsWithRetry(3 * (functionNames.length + 2));
     Set<String> expectedMetrics = getExpectedJmxMetrics(tableNames, functionNames);
 
-    // printMetrics(jmxMetrics, "existing metrics in per-table mode");
-    // printMetrics(expectedMetrics, "expected metrics in per-table mode");
+    printMetrics(jmxMetrics, "existing metrics in per-table mode");
+    printMetrics(expectedMetrics, "expected metrics in per-table mode");
 
     // assert that every expected is in the JMX
     for (String expected : expectedMetrics) {
@@ -199,11 +202,13 @@ public class TestStochasticBalancerJmxMetrics extends BalancerTestBase {
     }
   }
 
-  private Set<String> readJmxMetricsWithRetry() throws IOException {
+  private Set<String> readJmxMetricsWithRetry(int expectedMetricsCount) throws IOException {
     final int count = 0;
-    for (int i = 0; i < 10; i++) {
+    for (int i = 0; i < 20; i++) {
+
       Set<String> metrics = readJmxMetrics();
-      if (metrics != null) {
+
+      if (metrics != null && metrics.size() >= expectedMetricsCount){
         return metrics;
       }
       LOG.warn("Failed to get jmxmetrics... sleeping, retrying; " + i + " of " + count + " times");
@@ -219,6 +224,7 @@ public class TestStochasticBalancerJmxMetrics extends BalancerTestBase {
     JMXConnector connector = null;
     ObjectName target = null;
     MBeanServerConnection mb = null;
+
     try {
       connector =
           JMXConnectorFactory.connect(JMXListener.buildJMXServiceURL(connectorPort, connectorPort));
@@ -268,6 +274,7 @@ public class TestStochasticBalancerJmxMetrics extends BalancerTestBase {
 
     for (String tableName : tableNames) {
       ret.add(StochasticLoadBalancer.composeAttributeName(tableName, "Overall"));
+      ret.add(StochasticLoadBalancer.composeAttributeName(tableName, "Imbalance"));
       for (String functionName : functionNames) {
         String metricsName = StochasticLoadBalancer.composeAttributeName(tableName, functionName);
         ret.add(metricsName);
@@ -286,5 +293,6 @@ public class TestStochasticBalancerJmxMetrics extends BalancerTestBase {
     for (String str : metrics) {
       LOG.info(" ++++ " + str);
     }
+
   }
 }
