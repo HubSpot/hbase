@@ -254,10 +254,6 @@ public class ScannerCallable extends ClientServiceCallable<Result[]> {
       close();
       return null;
     }
-    if (TableName.isMetaTableName(getTableName())) {
-      LOG.info("Hi bri sleeping {} ms before scanning meta", getConnection().getConnectionConfiguration().getOperationTimeout() + 1000);
-      Thread.sleep(getConnection().getConnectionConfiguration().getOperationTimeout() + 1000);
-    }
     ScanResponse response;
     if (this.scannerId == -1L) {
       response = openScanner();
@@ -303,6 +299,16 @@ public class ScannerCallable extends ClientServiceCallable<Result[]> {
       setMoreResultsInRegion(MoreResults.UNKNOWN);
     }
     updateResultsMetrics(scanMetrics, rrs, isRegionServerRemote);
+    if (TableName.isMetaTableName(getTableName())) {
+      LOG.info("Hi bri sleeping {} ms after scanning meta", getConnection().getConnectionConfiguration().getOperationTimeout() + 1000);
+      Thread.sleep(getConnection().getConnectionConfiguration().getOperationTimeout() + 1000);
+      //return null; if we return null this gets passed trough this stack trace whicl results in a null pointer
+
+      //at org.apache.hadoop.hbase.client.CompleteScanResultCache.addAndGet(CompleteScanResultCache.java:73)
+      //	at org.apache.hadoop.hbase.client.ClientScanner.loadCache(ClientScanner.java:470)
+      //	at org.apache.hadoop.hbase.client.ClientScanner.nextWithSyncCache(ClientScanner.java:314)
+      //	at org.apache.hadoop.hbase.client.ClientScanner.next(ClientScanner.java:61
+    }
     return rrs;
   }
 
