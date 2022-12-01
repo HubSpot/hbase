@@ -257,7 +257,6 @@ public class ScannerCallable extends ClientServiceCallable<Result[]> {
     if (TableName.isMetaTableName(getTableName())) {
       LOG.info("Hi bri sleeping {} ms before scanning meta", getConnection().getConnectionConfiguration().getOperationTimeout() + 500);
       Thread.sleep(getConnection().getConnectionConfiguration().getOperationTimeout() + 500);
-      return null;
     }
     ScanResponse response;
     if (this.scannerId == -1L) {
