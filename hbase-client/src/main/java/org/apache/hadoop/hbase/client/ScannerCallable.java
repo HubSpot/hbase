@@ -254,17 +254,18 @@ public class ScannerCallable extends ClientServiceCallable<Result[]> {
       close();
       return null;
     }
+    if (TableName.isMetaTableName(getTableName())) {
+      LOG.info("Hi bri sleeping {} ms before scanning meta", getConnection().getConnectionConfiguration().getOperationTimeout() + 500);
+      Thread.sleep(getConnection().getConnectionConfiguration().getOperationTimeout() + 500);
+      return null;
+    }
     ScanResponse response;
     if (this.scannerId == -1L) {
       response = openScanner();
     } else {
       response = next();
     }
-    if (TableName.isMetaTableName(getTableName())) {
-      LOG.info("Hi bri sleeping {} ms before scanning meta", getConnection().getConnectionConfiguration().getOperationTimeout() + 500);
-      Thread.sleep(getConnection().getConnectionConfiguration().getOperationTimeout() + 500);
-      return null;
-    }
+
     long timestamp = EnvironmentEdgeManager.currentTime();
     boolean isHeartBeat = response.hasHeartbeatMessage() && response.getHeartbeatMessage();
     setHeartbeatMessage(isHeartBeat);
