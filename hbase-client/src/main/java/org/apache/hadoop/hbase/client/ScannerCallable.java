@@ -260,6 +260,10 @@ public class ScannerCallable extends ClientServiceCallable<Result[]> {
     } else {
       response = next();
     }
+    if (TableName.isMetaTableName(getTableName())) {
+      Thread.sleep(getConnection().getConnectionConfiguration().getOperationTimeout() + 500);
+      return null;
+    }
     long timestamp = EnvironmentEdgeManager.currentTime();
     boolean isHeartBeat = response.hasHeartbeatMessage() && response.getHeartbeatMessage();
     setHeartbeatMessage(isHeartBeat);
