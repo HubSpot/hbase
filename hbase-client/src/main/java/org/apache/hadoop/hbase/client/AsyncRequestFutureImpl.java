@@ -442,26 +442,26 @@ class AsyncRequestFutureImpl<CResult> implements AsyncRequestFuture {
     boolean isReplica = false;
     List<Action> unknownReplicaActions = null;
     for (Action action : currentActions) {
-      if (isOperationTimeoutExceeded()) {
-        String message = numAttempt == 1
-          ? "Operation timeout exceeded during resolution of region locations, "
-            + "prior to executing any actions."
-          : "Operation timeout exceeded during re-resolution of region locations on retry "
-            + (numAttempt - 1) + ".";
-
-        message += " Meta may be slow or operation timeout too short for batch size or retries.";
-        OperationTimeoutExceededException exception =
-          new OperationTimeoutExceededException(message);
-
-        // Clear any actions we already resolved, because none will have been executed yet
-        // We are going to fail all passed actions because there's no way we can execute any
-        // if operation timeout is exceeded.
-        actionsByServer.clear();
-        for (Action actionToFail : currentActions) {
-          manageLocationError(actionToFail, exception);
-        }
-        return;
-      }
+//      if (isOperationTimeoutExceeded()) {
+//        String message = numAttempt == 1
+//          ? "Operation timeout exceeded during resolution of region locations, "
+//            + "prior to executing any actions."
+//          : "Operation timeout exceeded during re-resolution of region locations on retry "
+//            + (numAttempt - 1) + ".";
+//
+//        message += " Meta may be slow or operation timeout too short for batch size or retries.";
+//        OperationTimeoutExceededException exception =
+//          new OperationTimeoutExceededException(message);
+//
+//        // Clear any actions we already resolved, because none will have been executed yet
+//        // We are going to fail all passed actions because there's no way we can execute any
+//        // if operation timeout is exceeded.
+//        actionsByServer.clear();
+//        for (Action actionToFail : currentActions) {
+//          manageLocationError(actionToFail, exception);
+//        }
+//        return;
+//      }
 
       RegionLocations locs = findAllLocationsOrFail(action, true);
       if (locs == null) continue;
