@@ -17,6 +17,7 @@
   <modules>
     <module>hbase-client-bundle</module>
     <module>hbase-mapreduce-bundle</module>
+    <module>hbase-testing-utils-bundle</module>
   </modules>
 
   <properties>
