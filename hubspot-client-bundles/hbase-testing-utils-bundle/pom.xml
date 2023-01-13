@@ -14,6 +14,7 @@
   <dependency>
     <groupId>org.apache.hbase</groupId>
     <artifactId>hbase-shaded-testing-util</artifactId>
+    <version>${revision}</version>
   </dependency>
   </dependencies>
 
