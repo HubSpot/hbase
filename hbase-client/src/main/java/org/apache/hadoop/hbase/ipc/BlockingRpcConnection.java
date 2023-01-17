@@ -243,20 +243,31 @@ class BlockingRpcConnection extends RpcConnection implements Runnable {
     }
   }
 
+  static class MockSocket extends Socket {
+    @Override
+    public void connect(SocketAddress endpoint, int timeout) throws IOException{
+      throw new SocketTimeoutException("Bri injecting socket timeout.");
+    }
+  }
+
   // protected for write UT.
   protected void setupConnection() throws IOException {
     short ioFailures = 0;
     short timeoutFailures = 0;
     while (true) {
       try {
+
+        //lets mess with this socket
         this.socket = this.rpcClient.socketFactory.createSocket();
         this.socket.setTcpNoDelay(this.rpcClient.isTcpNoDelay());
         this.socket.setKeepAlive(this.rpcClient.tcpKeepAlive);
         if (this.rpcClient.localAddr != null) {
           this.socket.bind(this.rpcClient.localAddr);
         }
+
         InetSocketAddress remoteAddr = getRemoteInetAddress(rpcClient.metrics);
-        NetUtils.connect(this.socket, remoteAddr, this.rpcClient.connectTO);
+        NetUtils.connect(new MockSocket(), remoteAddr, this.rpcClient.connectTO);
+
         this.socket.setSoTimeout(this.rpcClient.readTO);
         return;
       } catch (SocketTimeoutException toe) {
