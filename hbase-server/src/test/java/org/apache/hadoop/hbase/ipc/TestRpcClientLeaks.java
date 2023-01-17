@@ -110,7 +110,46 @@ public class TestRpcClientLeaks {
   public static final Logger LOG = LoggerFactory.getLogger(TestRpcClientLeaks.class);
 
   @Test
-  public void testSocketBlock(){
+  public void briTestSocketBlock() throws IOException, InterruptedException {
+
+    TableName tableName = TableName.valueOf(name.getMethodName());
+    UTIL.createTable(tableName, fam1).close();
+
+
+    Configuration conf = new Configuration(UTIL.getConfiguration());
+    try (Connection connection = ConnectionFactory.createConnection(conf);
+      Table table = connection.getTable(TableName.valueOf(name.getMethodName()))) {
+
+      // warm meta cache
+      table.getRegionLocator().getAllRegionLocations();
+
+      BlockingRpcClient.SHOULD_FAIL.set(true);
+
+      Thread blockedThread = new Thread(() -> {
+        try {
+          LOG.info("Executing test get");
+          table.get(new Get(Bytes.toBytes("asd")));
+          LOG.info("Done with test get");
+        } catch (IOException e) {
+          throw new RuntimeException(e);
+        }
+      });
+      blockedThread.start();
+
+      // wait until we know we're in the synchronized block
+      while (!BlockingRpcClient.SOCKET_WAITING.get()) {
+        Thread.sleep(10);
+      }
+
+      LOG.info("anotha one");
+      BlockingRpcClient.SHOULD_FAIL.set(false);
+      table.get(new Get(Bytes.toBytes("asd")));// this one should hopefully block in both cdh5 and hbase2
+    }
+
+
+
+
+
 
   }
   @Test
