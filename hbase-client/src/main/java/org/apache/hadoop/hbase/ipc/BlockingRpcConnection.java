@@ -38,12 +38,14 @@ import java.net.Socket;
 import java.net.SocketAddress;
 import java.net.SocketTimeoutException;
 import java.security.PrivilegedExceptionAction;
+import java.time.Duration;
 import java.util.ArrayDeque;
 import java.util.Locale;
 import java.util.Queue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.atomic.AtomicBoolean;
 import javax.security.sasl.SaslException;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.CellScanner;
@@ -87,7 +89,8 @@ import org.apache.hadoop.hbase.shaded.protobuf.generated.RPCProtos.ResponseHeade
  */
 @InterfaceAudience.Private
 class BlockingRpcConnection extends RpcConnection implements Runnable {
-
+  public static AtomicBoolean SHOULD_FAIL = new AtomicBoolean(false);
+  public static AtomicBoolean SOCKET_WAITING = new AtomicBoolean(false);
   private static final Logger LOG = LoggerFactory.getLogger(BlockingRpcConnection.class);
 
   private final BlockingRpcClient rpcClient;
@@ -244,12 +247,6 @@ class BlockingRpcConnection extends RpcConnection implements Runnable {
     }
   }
 
-  static class MockSocket extends Socket {
-    @Override
-    public void connect(SocketAddress endpoint, int timeout) throws IOException{
-      throw new SocketTimeoutException("Bri injecting socket timeout.");
-    }
-  }
 
   // protected for write UT.
   protected void setupConnection() throws IOException {
@@ -257,9 +254,24 @@ class BlockingRpcConnection extends RpcConnection implements Runnable {
     short timeoutFailures = 0;
     while (true) {
       try {
-
+        if (SHOULD_FAIL.get()) {
+          this.socket = new Socket() {
+            @Override
+            public void connect(SocketAddress endpoint, int timeout) throws IOException {
+              try {
+                LOG.info("Sleeping in mocked socket");
+                SOCKET_WAITING.set(true);
+                Thread.sleep(300_000);
+              } catch (InterruptedException e) {
+                throw new RuntimeException(e);
+              }
+              throw new SocketTimeoutException("from test after sleep");
+            }
+          };
+        } else {
+          this.socket = this.rpcClient.socketFactory.createSocket();
+        }
         //lets mess with this socket
-        this.socket = this.rpcClient.socketFactory.createSocket();
         this.socket.setTcpNoDelay(this.rpcClient.isTcpNoDelay());
         this.socket.setKeepAlive(this.rpcClient.tcpKeepAlive);
         if (this.rpcClient.localAddr != null) {
