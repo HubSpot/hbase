@@ -110,6 +110,10 @@ public class TestRpcClientLeaks {
   public static final Logger LOG = LoggerFactory.getLogger(TestRpcClientLeaks.class);
 
   @Test
+  public void testSocketBlock(){
+
+  }
+  @Test
   public void testSocketClosed() throws IOException, InterruptedException {
     TableName tableName = TableName.valueOf(name.getMethodName());
     UTIL.createTable(tableName, fam1).close();

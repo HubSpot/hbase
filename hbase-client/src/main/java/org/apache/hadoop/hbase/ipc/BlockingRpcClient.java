@@ -19,6 +19,7 @@ package org.apache.hadoop.hbase.ipc;
 
 import java.io.IOException;
 import java.net.SocketAddress;
+import java.util.concurrent.atomic.AtomicBoolean;
 import javax.net.SocketFactory;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.HConstants;
@@ -35,6 +36,8 @@ import org.apache.yetus.audience.InterfaceAudience;
 public class BlockingRpcClient extends AbstractRpcClient<BlockingRpcConnection> {
 
   protected final SocketFactory socketFactory; // how to create sockets
+  public static AtomicBoolean SHOULD_FAIL = new AtomicBoolean(false);
+  public static AtomicBoolean SOCKET_WAITING = new AtomicBoolean(false);
 
   /**
    * Used in test only. Construct an IPC client for the cluster {@code clusterId} with the default

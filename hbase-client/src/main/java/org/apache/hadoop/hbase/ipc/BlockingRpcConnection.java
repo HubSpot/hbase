@@ -89,8 +89,7 @@ import org.apache.hadoop.hbase.shaded.protobuf.generated.RPCProtos.ResponseHeade
  */
 @InterfaceAudience.Private
 class BlockingRpcConnection extends RpcConnection implements Runnable {
-  public static AtomicBoolean SHOULD_FAIL = new AtomicBoolean(false);
-  public static AtomicBoolean SOCKET_WAITING = new AtomicBoolean(false);
+
   private static final Logger LOG = LoggerFactory.getLogger(BlockingRpcConnection.class);
 
   private final BlockingRpcClient rpcClient;
@@ -254,13 +253,13 @@ class BlockingRpcConnection extends RpcConnection implements Runnable {
     short timeoutFailures = 0;
     while (true) {
       try {
-        if (SHOULD_FAIL.get()) {
+        if (BlockingRpcClient.SHOULD_FAIL.get()) {
           this.socket = new Socket() {
             @Override
             public void connect(SocketAddress endpoint, int timeout) throws IOException {
               try {
                 LOG.info("Sleeping in mocked socket");
-                SOCKET_WAITING.set(true);
+                BlockingRpcClient.SOCKET_WAITING.set(true);
                 Thread.sleep(300_000);
               } catch (InterruptedException e) {
                 throw new RuntimeException(e);
@@ -279,7 +278,7 @@ class BlockingRpcConnection extends RpcConnection implements Runnable {
         }
 
         InetSocketAddress remoteAddr = getRemoteInetAddress(rpcClient.metrics);
-        NetUtils.connect(new MockSocket(), remoteAddr, this.rpcClient.connectTO);
+        NetUtils.connect(this.socket, remoteAddr, this.rpcClient.connectTO);
 
         this.socket.setSoTimeout(this.rpcClient.readTO);
         return;
