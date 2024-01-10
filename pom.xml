@@ -854,8 +854,9 @@
     <!--
       Version of protobuf that hbase uses internally (we shade our pb) Must match what is out
       in hbase-thirdparty include.
+      HubSpot Edit: set this to 4.33.4 because HubSpot's maven repo only has certain versions for some reason
     -->
-    <internal.protobuf.version>4.34.0</internal.protobuf.version>
+    <internal.protobuf.version>4.33.4</internal.protobuf.version>
     <protobuf.plugin.version>0.6.1</protobuf.plugin.version>
     <thrift.path>thrift</thrift.path>
     <!-- Version of the Thrift IDL compiler used to (re)generate the Java sources under
