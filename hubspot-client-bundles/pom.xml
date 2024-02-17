@@ -22,7 +22,7 @@
     the dependency tree, so those dependencies become direct dependencies of the bundle. -->
     <zookeeper.version>3.6.3-shaded-SNAPSHOT</zookeeper.version>
 
-    <revision>3.0-hubspot-SNAPSHOT</revision>
+    <revision>2.5.2-hubspot-SNAPSHOT</revision>
   </properties>
 
   <dependencyManagement>

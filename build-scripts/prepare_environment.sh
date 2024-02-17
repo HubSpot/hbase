@@ -14,7 +14,7 @@ printenv
 # The reason for this is hbase re-branches for each minor release (2.4, 2.5, 2.6, etc). At each re-branch
 # the histories diverge. So we'll need to create our own fork of each new minor release branch.
 # The convention is a fork named "hubspot-$minorVersion", and the maven coordinates "$minorVersion-hubspot-SNAPSHOT"
-MINOR_VERSION="3.0"
+MINOR_VERSION="2.5.2"
 MAIN_BRANCH="hubspot-${MINOR_VERSION}"
 
 #
