@@ -143,6 +143,7 @@ import org.apache.hadoop.hbase.master.cleaner.ReplicationBarrierCleaner;
 import org.apache.hadoop.hbase.master.cleaner.SnapshotCleanerChore;
 import org.apache.hadoop.hbase.master.hbck.HbckChore;
 import org.apache.hadoop.hbase.master.http.MasterDumpServlet;
+import org.apache.hadoop.hbase.master.http.MasterHealthServlet;
 import org.apache.hadoop.hbase.master.http.MasterRedirectServlet;
 import org.apache.hadoop.hbase.master.http.MasterStatusServlet;
 import org.apache.hadoop.hbase.master.http.api_v1.ResourceConfigFactory;
@@ -798,6 +799,11 @@ public class HMaster extends HBaseServerBase<MasterRpcServices> implements Maste
   @Override
   protected Class<? extends HttpServlet> getDumpServlet() {
     return MasterDumpServlet.class;
+  }
+
+  @Override
+  protected Class<? extends HttpServlet> getHealthServlet() {
+    return MasterHealthServlet.class;
   }
 
   @Override

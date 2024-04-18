@@ -141,6 +141,7 @@ import org.apache.hadoop.hbase.regionserver.handler.CloseRegionHandler;
 import org.apache.hadoop.hbase.regionserver.handler.RSProcedureHandler;
 import org.apache.hadoop.hbase.regionserver.handler.RegionReplicaFlushHandler;
 import org.apache.hadoop.hbase.regionserver.http.RSDumpServlet;
+import org.apache.hadoop.hbase.regionserver.http.RSHealthServlet;
 import org.apache.hadoop.hbase.regionserver.http.RSStatusServlet;
 import org.apache.hadoop.hbase.regionserver.regionreplication.RegionReplicationBufferManager;
 import org.apache.hadoop.hbase.regionserver.throttle.FlushThroughputControllerFactory;
@@ -324,7 +325,7 @@ public class HRegionServer extends HBaseServerBase<RSRpcServices>
 
   // A state before we go into stopped state. At this stage we're closing user
   // space regions.
-  private boolean stopping = false;
+  private volatile boolean stopping = false;
   private volatile boolean killed = false;
 
   private final int threadWakeFrequency;
@@ -631,6 +632,11 @@ public class HRegionServer extends HBaseServerBase<RSRpcServices>
   @Override
   protected Class<? extends HttpServlet> getDumpServlet() {
     return RSDumpServlet.class;
+  }
+
+  @Override
+  protected Class<? extends HttpServlet> getHealthServlet() {
+    return RSHealthServlet.class;
   }
 
   /**

@@ -681,6 +681,8 @@ public abstract class HBaseServerBase<R extends HBaseRpcServicesBase<?>> extends
 
   protected abstract Class<? extends HttpServlet> getDumpServlet();
 
+  protected abstract Class<? extends HttpServlet> getHealthServlet();
+
   protected abstract boolean canUpdateTableDescriptor();
 
   protected abstract boolean cacheTableDescriptor();
