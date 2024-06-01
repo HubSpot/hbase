@@ -41,7 +41,9 @@ import org.apache.hadoop.hbase.protobuf.ProtobufUtil;
 import org.apache.hadoop.hbase.protobuf.generated.AggregateProtos.AggregateRequest;
 import org.apache.hadoop.hbase.protobuf.generated.AggregateProtos.AggregateResponse;
 import org.apache.hadoop.hbase.protobuf.generated.AggregateProtos.AggregateService;
+import org.apache.hadoop.hbase.quotas.OperationQuota;
 import org.apache.hadoop.hbase.regionserver.InternalScanner;
+import org.apache.hadoop.hbase.shaded.protobuf.generated.ClientProtos;
 import org.apache.yetus.audience.InterfaceAudience;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -63,6 +65,8 @@ public class AggregateImplementation<T, S, P extends Message, Q extends Message,
   extends AggregateService implements RegionCoprocessor {
   protected static final Logger log = LoggerFactory.getLogger(AggregateImplementation.class);
   private RegionCoprocessorEnvironment env;
+  private volatile long previousReadConsumed = 0;
+  private volatile long previousReadConsumedDifference = 0;
 
   /**
    * Gives the maximum for a given combination of column qualifier and column family, in the given
@@ -76,6 +80,7 @@ public class AggregateImplementation<T, S, P extends Message, Q extends Message,
     InternalScanner scanner = null;
     AggregateResponse response = null;
     T max = null;
+    OperationQuota quota = null;
     try {
       ColumnInterpreter<T, S, P, Q, R> ci = constructColumnInterpreterFromRequest(request);
       T temp;
@@ -91,12 +96,15 @@ public class AggregateImplementation<T, S, P extends Message, Q extends Message,
       // qualifier can be null.
       boolean hasMoreRows = false;
       do {
+        long maxBlockBytesScanned = quota == null ? Long.MAX_VALUE : quota.getMaxResultSize();
+        quota = env.checkScanQuota(scan, maxBlockBytesScanned, previousReadConsumedDifference);
         hasMoreRows = scanner.next(results);
         int listSize = results.size();
         for (int i = 0; i < listSize; i++) {
           temp = ci.getValue(colFamily, qualifier, results.get(i));
           max = (max == null || (temp != null && ci.compare(temp, max) > 0)) ? temp : max;
         }
+        quota.addScanResultCells(results);
         results.clear();
       } while (hasMoreRows);
       if (max != null) {
@@ -110,6 +118,7 @@ public class AggregateImplementation<T, S, P extends Message, Q extends Message,
       if (scanner != null) {
         IOUtils.closeQuietly(scanner);
       }
+      closeQuota(quota);
     }
     log.info("Maximum from this region is "
       + env.getRegion().getRegionInfo().getRegionNameAsString() + ": " + max);
@@ -128,6 +137,7 @@ public class AggregateImplementation<T, S, P extends Message, Q extends Message,
     AggregateResponse response = null;
     InternalScanner scanner = null;
     T min = null;
+    OperationQuota quota = null;
     try {
       ColumnInterpreter<T, S, P, Q, R> ci = constructColumnInterpreterFromRequest(request);
       T temp;
@@ -142,12 +152,15 @@ public class AggregateImplementation<T, S, P extends Message, Q extends Message,
       }
       boolean hasMoreRows = false;
       do {
+        long maxBlockBytesScanned = quota == null ? Long.MAX_VALUE : quota.getMaxResultSize();
+        quota = env.checkScanQuota(scan, maxBlockBytesScanned, previousReadConsumedDifference);
         hasMoreRows = scanner.next(results);
         int listSize = results.size();
         for (int i = 0; i < listSize; i++) {
           temp = ci.getValue(colFamily, qualifier, results.get(i));
           min = (min == null || (temp != null && ci.compare(temp, min) < 0)) ? temp : min;
         }
+        quota.addScanResultCells(results);
         results.clear();
       } while (hasMoreRows);
       if (min != null) {
@@ -160,6 +173,7 @@ public class AggregateImplementation<T, S, P extends Message, Q extends Message,
       if (scanner != null) {
         IOUtils.closeQuietly(scanner);
       }
+      closeQuota(quota);
     }
     log.info("Minimum from this region is "
       + env.getRegion().getRegionInfo().getRegionNameAsString() + ": " + min);
@@ -178,6 +192,7 @@ public class AggregateImplementation<T, S, P extends Message, Q extends Message,
     AggregateResponse response = null;
     InternalScanner scanner = null;
     long sum = 0L;
+    OperationQuota quota = null;
     try {
       ColumnInterpreter<T, S, P, Q, R> ci = constructColumnInterpreterFromRequest(request);
       S sumVal = null;
@@ -193,6 +208,8 @@ public class AggregateImplementation<T, S, P extends Message, Q extends Message,
       List<Cell> results = new ArrayList<>();
       boolean hasMoreRows = false;
       do {
+        long maxBlockBytesScanned = quota == null ? Long.MAX_VALUE : quota.getMaxResultSize();
+        quota = env.checkScanQuota(scan, maxBlockBytesScanned, previousReadConsumedDifference);
         hasMoreRows = scanner.next(results);
         int listSize = results.size();
         for (int i = 0; i < listSize; i++) {
@@ -201,6 +218,7 @@ public class AggregateImplementation<T, S, P extends Message, Q extends Message,
             sumVal = ci.add(sumVal, ci.castToReturnType(temp));
           }
         }
+        quota.addScanResultCells(results);
         results.clear();
       } while (hasMoreRows);
       if (sumVal != null) {
@@ -213,6 +231,7 @@ public class AggregateImplementation<T, S, P extends Message, Q extends Message,
       if (scanner != null) {
         IOUtils.closeQuietly(scanner);
       }
+      closeQuota(quota);
     }
     log.debug("Sum from this region is " + env.getRegion().getRegionInfo().getRegionNameAsString()
       + ": " + sum);
@@ -230,6 +249,7 @@ public class AggregateImplementation<T, S, P extends Message, Q extends Message,
     long counter = 0L;
     List<Cell> results = new ArrayList<>();
     InternalScanner scanner = null;
+    OperationQuota quota = null;
     try {
       Scan scan = ProtobufUtil.toScan(request.getScan());
       byte[][] colFamilies = scan.getFamilies();
@@ -246,10 +266,13 @@ public class AggregateImplementation<T, S, P extends Message, Q extends Message,
       scanner = env.getRegion().getScanner(scan);
       boolean hasMoreRows = false;
       do {
+        long maxBlockBytesScanned = quota == null ? Long.MAX_VALUE : quota.getMaxResultSize();
+        quota = env.checkScanQuota(scan, maxBlockBytesScanned, previousReadConsumedDifference);
         hasMoreRows = scanner.next(results);
         if (results.size() > 0) {
           counter++;
         }
+        quota.addScanResultCells(results);
         results.clear();
       } while (hasMoreRows);
       ByteBuffer bb = ByteBuffer.allocate(8).putLong(counter);
@@ -261,6 +284,7 @@ public class AggregateImplementation<T, S, P extends Message, Q extends Message,
       if (scanner != null) {
         IOUtils.closeQuietly(scanner);
       }
+      closeQuota(quota);
     }
     log.info("Row counter from this region is "
       + env.getRegion().getRegionInfo().getRegionNameAsString() + ": " + counter);
@@ -282,6 +306,7 @@ public class AggregateImplementation<T, S, P extends Message, Q extends Message,
     RpcCallback<AggregateResponse> done) {
     AggregateResponse response = null;
     InternalScanner scanner = null;
+    OperationQuota quota = null;
     try {
       ColumnInterpreter<T, S, P, Q, R> ci = constructColumnInterpreterFromRequest(request);
       S sumVal = null;
@@ -299,6 +324,8 @@ public class AggregateImplementation<T, S, P extends Message, Q extends Message,
 
       do {
         results.clear();
+        long maxBlockBytesScanned = quota == null ? Long.MAX_VALUE : quota.getMaxResultSize();
+        quota = env.checkScanQuota(scan, maxBlockBytesScanned, previousReadConsumedDifference);
         hasMoreRows = scanner.next(results);
         int listSize = results.size();
         for (int i = 0; i < listSize; i++) {
@@ -306,6 +333,7 @@ public class AggregateImplementation<T, S, P extends Message, Q extends Message,
             ci.add(sumVal, ci.castToReturnType(ci.getValue(colFamily, qualifier, results.get(i))));
         }
         rowCountVal++;
+        quota.addScanResultCells(results);
       } while (hasMoreRows);
       if (sumVal != null) {
         ByteString first = ci.getProtoForPromotedType(sumVal).toByteString();
@@ -322,6 +350,7 @@ public class AggregateImplementation<T, S, P extends Message, Q extends Message,
       if (scanner != null) {
         IOUtils.closeQuietly(scanner);
       }
+      closeQuota(quota);
     }
     done.run(response);
   }
@@ -339,6 +368,7 @@ public class AggregateImplementation<T, S, P extends Message, Q extends Message,
     RpcCallback<AggregateResponse> done) {
     InternalScanner scanner = null;
     AggregateResponse response = null;
+    OperationQuota quota = null;
     try {
       ColumnInterpreter<T, S, P, Q, R> ci = constructColumnInterpreterFromRequest(request);
       S sumVal = null, sumSqVal = null, tempVal = null;
@@ -356,6 +386,8 @@ public class AggregateImplementation<T, S, P extends Message, Q extends Message,
       boolean hasMoreRows = false;
 
       do {
+        long maxBlockBytesScanned = quota == null ? Long.MAX_VALUE : quota.getMaxResultSize();
+        quota = env.checkScanQuota(scan, maxBlockBytesScanned, previousReadConsumedDifference);
         tempVal = null;
         hasMoreRows = scanner.next(results);
         int listSize = results.size();
@@ -363,6 +395,7 @@ public class AggregateImplementation<T, S, P extends Message, Q extends Message,
           tempVal =
             ci.add(tempVal, ci.castToReturnType(ci.getValue(colFamily, qualifier, results.get(i))));
         }
+        quota.addScanResultCells(results);
         results.clear();
         sumVal = ci.add(sumVal, tempVal);
         sumSqVal = ci.add(sumSqVal, ci.multiply(tempVal, tempVal));
@@ -385,6 +418,7 @@ public class AggregateImplementation<T, S, P extends Message, Q extends Message,
       if (scanner != null) {
         IOUtils.closeQuietly(scanner);
       }
+      closeQuota(quota);
     }
     done.run(response);
   }
@@ -400,6 +434,7 @@ public class AggregateImplementation<T, S, P extends Message, Q extends Message,
     RpcCallback<AggregateResponse> done) {
     AggregateResponse response = null;
     InternalScanner scanner = null;
+    OperationQuota quota = null;
     try {
       ColumnInterpreter<T, S, P, Q, R> ci = constructColumnInterpreterFromRequest(request);
       S sumVal = null, sumWeights = null, tempVal = null, tempWeight = null;
@@ -418,6 +453,8 @@ public class AggregateImplementation<T, S, P extends Message, Q extends Message,
       boolean hasMoreRows = false;
 
       do {
+        long maxBlockBytesScanned = quota == null ? Long.MAX_VALUE : quota.getMaxResultSize();
+        quota = env.checkScanQuota(scan, maxBlockBytesScanned, previousReadConsumedDifference);
         tempVal = null;
         tempWeight = null;
         hasMoreRows = scanner.next(results);
@@ -430,6 +467,7 @@ public class AggregateImplementation<T, S, P extends Message, Q extends Message,
               ci.add(tempWeight, ci.castToReturnType(ci.getValue(colFamily, weightQualifier, kv)));
           }
         }
+        quota.addScanResultCells(results);
         results.clear();
         sumVal = ci.add(sumVal, tempVal);
         sumWeights = ci.add(sumWeights, tempWeight);
@@ -447,6 +485,7 @@ public class AggregateImplementation<T, S, P extends Message, Q extends Message,
       if (scanner != null) {
         IOUtils.closeQuietly(scanner);
       }
+      closeQuota(quota);
     }
     done.run(response);
   }
@@ -500,5 +539,14 @@ public class AggregateImplementation<T, S, P extends Message, Q extends Message,
   @Override
   public void stop(CoprocessorEnvironment env) throws IOException {
     // nothing to do
+  }
+
+  private void closeQuota(OperationQuota quota) {
+    if (quota != null) {
+      quota.close();
+      long readConsumed = quota.getReadConsumed();
+      previousReadConsumedDifference = readConsumed - previousReadConsumed;
+      previousReadConsumed = readConsumed;
+    }
   }
 }
