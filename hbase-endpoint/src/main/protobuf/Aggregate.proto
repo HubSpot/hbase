@@ -36,6 +36,7 @@ message AggregateRequest {
   required string interpreter_class_name = 1;
   required Scan scan = 2;
   optional bytes  interpreter_specific_bytes = 3;
+  optional bool client_accepts_partial_results = 4 [default = false];
 }
 
 message AggregateResponse {
@@ -48,6 +49,8 @@ message AggregateResponse {
    */ 
   repeated bytes first_part = 1;
   optional bytes second_part = 2;
+  optional Scan  next_scan = 3;
+  optional int64 wait_interval_ms = 4;
 }
 
 /** Refer to the AggregateImplementation class for an overview of the 

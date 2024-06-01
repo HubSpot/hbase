@@ -71,6 +71,7 @@ public final class AggregationHelper {
       requestBuilder.setInterpreterSpecificBytes(columnInterpreterSpecificData.toByteString());
     }
     requestBuilder.setScan(ProtobufUtil.toScan(scan));
+    requestBuilder.setClientAcceptsPartialResults(true);
     return requestBuilder.build();
   }
 

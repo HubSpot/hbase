@@ -28,6 +28,7 @@ import java.io.Closeable;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.NavigableMap;
@@ -49,6 +50,7 @@ import org.apache.hadoop.hbase.ipc.CoprocessorRpcUtils;
 import org.apache.hadoop.hbase.protobuf.generated.AggregateProtos.AggregateRequest;
 import org.apache.hadoop.hbase.protobuf.generated.AggregateProtos.AggregateResponse;
 import org.apache.hadoop.hbase.protobuf.generated.AggregateProtos.AggregateService;
+import org.apache.hadoop.hbase.protobuf.generated.ClientProtos;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.Pair;
 import org.apache.yetus.audience.InterfaceAudience;
@@ -240,13 +242,13 @@ public class AggregationClient implements Closeable {
     }
     MaxCallBack aMaxCallBack = new MaxCallBack();
     table.coprocessorService(AggregateService.class, scan.getStartRow(), scan.getStopRow(),
-      new Batch.Call<AggregateService, R>() {
-        @Override
-        public R call(AggregateService instance) throws IOException {
-          RpcController controller = new AggregationClientRpcController();
-          CoprocessorRpcUtils.BlockingRpcCallback<AggregateResponse> rpcCallback =
-            new CoprocessorRpcUtils.BlockingRpcCallback<>();
-          instance.getMax(controller, requestArg, rpcCallback);
+      instance -> {
+        RpcController controller = new AggregationClientRpcController();
+        CoprocessorRpcUtils.BlockingRpcCallback<AggregateResponse> rpcCallback = new CoprocessorRpcUtils.BlockingRpcCallback<>();
+        R max = null;
+        PartialResultContext partialResultContext = new PartialResultContext(requestArg.getScan());
+        while (partialResultContext.hasMore) {
+          instance.getMax(controller, partialResultContext.withCurrentScan(requestArg), rpcCallback);
           AggregateResponse response = rpcCallback.get();
           if (controller.failed()) {
             throw new IOException(controller.errorText());
@@ -254,10 +256,12 @@ public class AggregationClient implements Closeable {
           if (response.getFirstPartCount() > 0) {
             ByteString b = response.getFirstPart(0);
             Q q = getParsedGenericInstance(ci.getClass(), 3, b);
-            return ci.getCellValueFromProto(q);
+            R result = ci.getCellValueFromProto(q);
+            max = (max == null || (result != null && ci.compare(max, result) < 0)) ? result : max;
           }
-          return null;
+          postScan(response, partialResultContext);
         }
+        return max;
       }, aMaxCallBack);
     return aMaxCallBack.getMax();
   }
@@ -308,13 +312,14 @@ public class AggregationClient implements Closeable {
 
     MinCallBack minCallBack = new MinCallBack();
     table.coprocessorService(AggregateService.class, scan.getStartRow(), scan.getStopRow(),
-      new Batch.Call<AggregateService, R>() {
-        @Override
-        public R call(AggregateService instance) throws IOException {
-          RpcController controller = new AggregationClientRpcController();
-          CoprocessorRpcUtils.BlockingRpcCallback<AggregateResponse> rpcCallback =
-            new CoprocessorRpcUtils.BlockingRpcCallback<>();
-          instance.getMin(controller, requestArg, rpcCallback);
+      instance -> {
+        RpcController controller = new AggregationClientRpcController();
+        CoprocessorRpcUtils.BlockingRpcCallback<AggregateResponse> rpcCallback =
+          new CoprocessorRpcUtils.BlockingRpcCallback<>();
+        R min = null;
+        PartialResultContext partialResultContext = new PartialResultContext(requestArg.getScan());
+        while (partialResultContext.hasMore) {
+          instance.getMin(controller, partialResultContext.withCurrentScan(requestArg), rpcCallback);
           AggregateResponse response = rpcCallback.get();
           if (controller.failed()) {
             throw new IOException(controller.errorText());
@@ -322,10 +327,12 @@ public class AggregationClient implements Closeable {
           if (response.getFirstPartCount() > 0) {
             ByteString b = response.getFirstPart(0);
             Q q = getParsedGenericInstance(ci.getClass(), 3, b);
-            return ci.getCellValueFromProto(q);
+            R result = ci.getCellValueFromProto(q);
+            min = (min == null || (result != null && ci.compare(result, min) < 0)) ? result : min;
           }
-          return null;
+          postScan(response, partialResultContext);
         }
+        return min;
       }, minCallBack);
     log.debug("Min fom all regions is: " + minCallBack.getMinimum());
     return minCallBack.getMinimum();
@@ -378,19 +385,20 @@ public class AggregationClient implements Closeable {
 
       @Override
       public void update(byte[] region, byte[] row, Long result) {
-        rowCountL.addAndGet(result.longValue());
+        rowCountL.addAndGet(result);
       }
     }
 
     RowNumCallback rowNum = new RowNumCallback();
     table.coprocessorService(AggregateService.class, scan.getStartRow(), scan.getStopRow(),
-      new Batch.Call<AggregateService, Long>() {
-        @Override
-        public Long call(AggregateService instance) throws IOException {
-          RpcController controller = new AggregationClientRpcController();
-          CoprocessorRpcUtils.BlockingRpcCallback<AggregateResponse> rpcCallback =
-            new CoprocessorRpcUtils.BlockingRpcCallback<>();
-          instance.getRowNum(controller, requestArg, rpcCallback);
+      instance -> {
+        RpcController controller = new AggregationClientRpcController();
+        CoprocessorRpcUtils.BlockingRpcCallback<AggregateResponse> rpcCallback =
+          new CoprocessorRpcUtils.BlockingRpcCallback<>();
+        long sum = 0;
+        PartialResultContext partialResultContext = new PartialResultContext(requestArg.getScan());
+        while (partialResultContext.hasMore) {
+          instance.getRowNum(controller, partialResultContext.withCurrentScan(requestArg), rpcCallback);
           AggregateResponse response = rpcCallback.get();
           if (controller.failed()) {
             throw new IOException(controller.errorText());
@@ -398,8 +406,11 @@ public class AggregationClient implements Closeable {
           byte[] bytes = getBytesFromResponse(response.getFirstPart(0));
           ByteBuffer bb = ByteBuffer.allocate(8).put(bytes);
           bb.rewind();
-          return bb.getLong();
+          sum += bb.getLong();
+          postScan(response, partialResultContext);
         }
+        log.debug("GetRowNum finished with sum {}", sum);
+        return sum;
       }, rowNum);
     return rowNum.getRowNumCount();
   }
@@ -450,26 +461,27 @@ public class AggregationClient implements Closeable {
     }
     SumCallBack sumCallBack = new SumCallBack();
     table.coprocessorService(AggregateService.class, scan.getStartRow(), scan.getStopRow(),
-      new Batch.Call<AggregateService, S>() {
-        @Override
-        public S call(AggregateService instance) throws IOException {
-          RpcController controller = new AggregationClientRpcController();
-          // Not sure what is going on here why I have to do these casts. TODO.
-          CoprocessorRpcUtils.BlockingRpcCallback<AggregateResponse> rpcCallback =
-            new CoprocessorRpcUtils.BlockingRpcCallback<>();
-          instance.getSum(controller, requestArg, rpcCallback);
+      instance -> {
+        RpcController controller = new AggregationClientRpcController();
+        // Not sure what is going on here why I have to do these casts. TODO.
+        CoprocessorRpcUtils.BlockingRpcCallback<AggregateResponse> rpcCallback =
+          new CoprocessorRpcUtils.BlockingRpcCallback<>();
+        S sum = null;
+        PartialResultContext partialResultContext = new PartialResultContext(requestArg.getScan());
+        while (partialResultContext.hasMore) {
+          instance.getSum(controller, partialResultContext.withCurrentScan(requestArg), rpcCallback);
           AggregateResponse response = rpcCallback.get();
           if (controller.failed()) {
             throw new IOException(controller.errorText());
           }
-          if (response.getFirstPartCount() == 0) {
-            return null;
+          if (response.getFirstPartCount() > 0) {
+            ByteString b = response.getFirstPart(0);
+            T t = getParsedGenericInstance(ci.getClass(), 4, b);
+            sum = ci.add(sum, ci.getPromotedValueFromProto(t));
           }
-          ByteString b = response.getFirstPart(0);
-          T t = getParsedGenericInstance(ci.getClass(), 4, b);
-          S s = ci.getPromotedValueFromProto(t);
-          return s;
+          postScan(response, partialResultContext);
         }
+        return sum;
       }, sumCallBack);
     return sumCallBack.getSumResult();
   }
@@ -521,31 +533,31 @@ public class AggregationClient implements Closeable {
 
     AvgCallBack avgCallBack = new AvgCallBack();
     table.coprocessorService(AggregateService.class, scan.getStartRow(), scan.getStopRow(),
-      new Batch.Call<AggregateService, Pair<S, Long>>() {
-        @Override
-        public Pair<S, Long> call(AggregateService instance) throws IOException {
-          RpcController controller = new AggregationClientRpcController();
-          CoprocessorRpcUtils.BlockingRpcCallback<AggregateResponse> rpcCallback =
-            new CoprocessorRpcUtils.BlockingRpcCallback<>();
-          instance.getAvg(controller, requestArg, rpcCallback);
+      instance -> {
+        RpcController controller = new AggregationClientRpcController();
+        CoprocessorRpcUtils.BlockingRpcCallback<AggregateResponse> rpcCallback =
+          new CoprocessorRpcUtils.BlockingRpcCallback<>();
+        S sum = null;
+        long rowCount = 0L;
+        PartialResultContext partialResultContext = new PartialResultContext(requestArg.getScan());
+        while (partialResultContext.hasMore) {
+          instance.getAvg(controller, partialResultContext.withCurrentScan(requestArg), rpcCallback);
           AggregateResponse response = rpcCallback.get();
           if (controller.failed()) {
             throw new IOException(controller.errorText());
           }
-          Pair<S, Long> pair = new Pair<>(null, 0L);
-          if (response.getFirstPartCount() == 0) {
-            return pair;
+          if (response.getFirstPartCount() > 0) {
+            ByteString b = response.getFirstPart(0);
+            T t = getParsedGenericInstance(ci.getClass(), 4, b);
+            sum = ci.add(sum, ci.getPromotedValueFromProto(t));
+            ByteBuffer bb =
+              ByteBuffer.allocate(8).put(getBytesFromResponse(response.getSecondPart()));
+            bb.rewind();
+            rowCount += bb.getLong();
           }
-          ByteString b = response.getFirstPart(0);
-          T t = getParsedGenericInstance(ci.getClass(), 4, b);
-          S s = ci.getPromotedValueFromProto(t);
-          pair.setFirst(s);
-          ByteBuffer bb =
-            ByteBuffer.allocate(8).put(getBytesFromResponse(response.getSecondPart()));
-          bb.rewind();
-          pair.setSecond(bb.getLong());
-          return pair;
+          postScan(response, partialResultContext);
         }
+        return new Pair<>(sum, rowCount);
       }, avgCallBack);
     return avgCallBack.getAvgArgs();
   }
@@ -625,35 +637,37 @@ public class AggregationClient implements Closeable {
 
     StdCallback stdCallback = new StdCallback();
     table.coprocessorService(AggregateService.class, scan.getStartRow(), scan.getStopRow(),
-      new Batch.Call<AggregateService, Pair<List<S>, Long>>() {
-        @Override
-        public Pair<List<S>, Long> call(AggregateService instance) throws IOException {
-          RpcController controller = new AggregationClientRpcController();
-          CoprocessorRpcUtils.BlockingRpcCallback<AggregateResponse> rpcCallback =
-            new CoprocessorRpcUtils.BlockingRpcCallback<>();
-          instance.getStd(controller, requestArg, rpcCallback);
+      instance -> {
+        RpcController controller = new AggregationClientRpcController();
+        CoprocessorRpcUtils.BlockingRpcCallback<AggregateResponse> rpcCallback =
+          new CoprocessorRpcUtils.BlockingRpcCallback<>();
+        long rowCountVal = 0L;
+        S sumVal = null, sumSqVal = null;
+        PartialResultContext partialResultContext = new PartialResultContext(requestArg.getScan());
+        while (partialResultContext.hasMore) {
+          instance.getStd(controller, partialResultContext.withCurrentScan(requestArg), rpcCallback);
           AggregateResponse response = rpcCallback.get();
           if (controller.failed()) {
             throw new IOException(controller.errorText());
           }
-          Pair<List<S>, Long> pair = new Pair<>(new ArrayList<>(), 0L);
-          if (response.getFirstPartCount() == 0) {
-            return pair;
-          }
-          List<S> list = new ArrayList<>();
-          for (int i = 0; i < response.getFirstPartCount(); i++) {
-            ByteString b = response.getFirstPart(i);
+
+          if (response.getFirstPartCount() == 2) {
+            ByteString b = response.getFirstPart(0);
             T t = getParsedGenericInstance(ci.getClass(), 4, b);
-            S s = ci.getPromotedValueFromProto(t);
-            list.add(s);
+            sumVal = ci.add(sumVal, ci.getPromotedValueFromProto(t));
+
+            b = response.getFirstPart(1);
+            t = getParsedGenericInstance(ci.getClass(), 4, b);
+            sumSqVal = ci.add(sumSqVal, ci.getPromotedValueFromProto(t));
+
+            ByteBuffer bb =
+              ByteBuffer.allocate(8).put(getBytesFromResponse(response.getSecondPart()));
+            bb.rewind();
+            rowCountVal += bb.getLong();
           }
-          pair.setFirst(list);
-          ByteBuffer bb =
-            ByteBuffer.allocate(8).put(getBytesFromResponse(response.getSecondPart()));
-          bb.rewind();
-          pair.setSecond(bb.getLong());
-          return pair;
+          postScan(response, partialResultContext);
         }
+        return new Pair<>(Arrays.asList(sumVal, sumSqVal), rowCountVal);
       }, stdCallback);
     return stdCallback.getStdParams();
   }
@@ -736,28 +750,31 @@ public class AggregationClient implements Closeable {
     }
     StdCallback stdCallback = new StdCallback();
     table.coprocessorService(AggregateService.class, scan.getStartRow(), scan.getStopRow(),
-      new Batch.Call<AggregateService, List<S>>() {
-        @Override
-        public List<S> call(AggregateService instance) throws IOException {
-          RpcController controller = new AggregationClientRpcController();
-          CoprocessorRpcUtils.BlockingRpcCallback<AggregateResponse> rpcCallback =
-            new CoprocessorRpcUtils.BlockingRpcCallback<>();
-          instance.getMedian(controller, requestArg, rpcCallback);
+      instance -> {
+        RpcController controller = new AggregationClientRpcController();
+        CoprocessorRpcUtils.BlockingRpcCallback<AggregateResponse> rpcCallback =
+          new CoprocessorRpcUtils.BlockingRpcCallback<>();
+        S sumVal = null, sumWeights = null;
+        PartialResultContext partialResultContext = new PartialResultContext(requestArg.getScan());
+        while (partialResultContext.hasMore) {
+          instance.getMedian(controller, partialResultContext.withCurrentScan(requestArg), rpcCallback);
           AggregateResponse response = rpcCallback.get();
           if (controller.failed()) {
             throw new IOException(controller.errorText());
           }
 
-          List<S> list = new ArrayList<>();
-          for (int i = 0; i < response.getFirstPartCount(); i++) {
-            ByteString b = response.getFirstPart(i);
+          if (response.getFirstPartCount() == 2) {
+            ByteString b = response.getFirstPart(0);
             T t = getParsedGenericInstance(ci.getClass(), 4, b);
-            S s = ci.getPromotedValueFromProto(t);
-            list.add(s);
-          }
-          return list;
-        }
+            sumVal = ci.add(sumVal, ci.getPromotedValueFromProto(t));
 
+            b = response.getFirstPart(1);
+            t = getParsedGenericInstance(ci.getClass(), 4, b);
+            sumWeights = ci.add(sumWeights, ci.getPromotedValueFromProto(t));
+          }
+          postScan(response, partialResultContext);
+        }
+        return Arrays.asList(sumVal, sumWeights);
       }, stdCallback);
     return stdCallback.getMedianParams();
   }
@@ -868,5 +885,34 @@ public class AggregationClient implements Closeable {
 
   byte[] getBytesFromResponse(ByteString response) {
     return response.toByteArray();
+  }
+
+  private static final class PartialResultContext {
+    ClientProtos.Scan currentScan;
+    boolean hasMore = true;
+
+    public PartialResultContext(ClientProtos.Scan currentScan) {
+      this.currentScan = currentScan;
+    }
+
+    public AggregateRequest withCurrentScan(AggregateRequest request) {
+      return request.toBuilder()
+        .setScan(currentScan).build();
+    }
+  }
+
+  private void postScan(AggregateResponse response, PartialResultContext context) {
+    // Will be false for servers that do not support paging in AggregateImplementation
+    if (response.hasNextScan()) {
+      context.currentScan = response.getNextScan();
+    } else {
+      context.hasMore = false;
+    }
+    if (response.hasWaitIntervalMs()) {
+      try {
+        log.debug("Sleeping {}ms for requested wait interval", response.getWaitIntervalMs());
+        Thread.sleep(response.getWaitIntervalMs());
+      } catch (InterruptedException ignored) {}
+    }
   }
 }
