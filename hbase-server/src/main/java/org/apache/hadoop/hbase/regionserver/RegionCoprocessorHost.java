@@ -69,11 +69,16 @@ import org.apache.hadoop.hbase.io.FSDataInputStreamWrapper;
 import org.apache.hadoop.hbase.io.Reference;
 import org.apache.hadoop.hbase.io.hfile.CacheConfig;
 import org.apache.hadoop.hbase.metrics.MetricRegistry;
+import org.apache.hadoop.hbase.quotas.OperationQuota;
+import org.apache.hadoop.hbase.quotas.RegionServerRpcQuotaManager;
+import org.apache.hadoop.hbase.quotas.RpcQuotaManager;
 import org.apache.hadoop.hbase.regionserver.Region.Operation;
 import org.apache.hadoop.hbase.regionserver.compactions.CompactionLifeCycleTracker;
 import org.apache.hadoop.hbase.regionserver.compactions.CompactionRequest;
 import org.apache.hadoop.hbase.regionserver.querymatcher.DeleteTracker;
 import org.apache.hadoop.hbase.security.User;
+import org.apache.hadoop.hbase.shaded.protobuf.RequestConverter;
+import org.apache.hadoop.hbase.shaded.protobuf.generated.ClientProtos;
 import org.apache.hadoop.hbase.util.CoprocessorClassLoader;
 import org.apache.hadoop.hbase.util.Pair;
 import org.apache.hadoop.hbase.wal.WALEdit;
@@ -118,6 +123,7 @@ public class RegionCoprocessorHost
     ConcurrentMap<String, Object> sharedData;
     private final MetricRegistry metricRegistry;
     private final RegionServerServices services;
+    private final RpcQuotaManager rpcQuotaManager;
 
     /**
      * Constructor
@@ -133,6 +139,7 @@ public class RegionCoprocessorHost
       this.services = services;
       this.metricRegistry =
         MetricsCoprocessor.createRegistryForRegionCoprocessor(impl.getClass().getName());
+      this.rpcQuotaManager = services.getRegionServerRpcQuotaManager();
     }
 
     /** Returns the region */
@@ -187,6 +194,27 @@ public class RegionCoprocessorHost
     public RawCellBuilder getCellBuilder() {
       // We always do a DEEP_COPY only
       return RawCellBuilderFactory.create();
+    }
+
+    @Override
+    public RpcQuotaManager getRpcQuotaManager() {
+      return rpcQuotaManager;
+    }
+
+    @Override
+    public OperationQuota checkScanQuota(Scan scan, long maxBlockBytesScanned, long prevBlockBytesScannedDifference) throws IOException {
+      ClientProtos.ScanRequest scanRequest = RequestConverter.buildScanRequest(
+        region.getRegionInfo().getRegionName(), scan, scan.getCaching(), false
+      );
+      long maxScannerResultSize = services.getConfiguration().getLong(HConstants.HBASE_SERVER_SCANNER_MAX_RESULT_SIZE_KEY,
+        HConstants.DEFAULT_HBASE_SERVER_SCANNER_MAX_RESULT_SIZE);
+      return rpcQuotaManager.checkScanQuota(
+        region,
+        scanRequest,
+        maxScannerResultSize,
+        maxBlockBytesScanned,
+        prevBlockBytesScannedDifference
+      );
     }
   }
 
