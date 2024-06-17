@@ -120,7 +120,7 @@ public class AggregateImplementation<T, S, P extends Message, Q extends Message,
       }
       closeQuota(quota);
     }
-    log.info("Maximum from this region is "
+    log.debug("Maximum from this region is "
       + env.getRegion().getRegionInfo().getRegionNameAsString() + ": " + max);
     done.run(response);
   }
@@ -175,7 +175,7 @@ public class AggregateImplementation<T, S, P extends Message, Q extends Message,
       }
       closeQuota(quota);
     }
-    log.info("Minimum from this region is "
+    log.debug("Minimum from this region is "
       + env.getRegion().getRegionInfo().getRegionNameAsString() + ": " + min);
     done.run(response);
   }
@@ -286,7 +286,7 @@ public class AggregateImplementation<T, S, P extends Message, Q extends Message,
       }
       closeQuota(quota);
     }
-    log.info("Row counter from this region is "
+    log.debug("Row counter from this region is "
       + env.getRegion().getRegionInfo().getRegionNameAsString() + ": " + counter);
     done.run(response);
   }
