@@ -42,6 +42,7 @@ import org.apache.hadoop.hbase.protobuf.generated.AggregateProtos.AggregateReque
 import org.apache.hadoop.hbase.protobuf.generated.AggregateProtos.AggregateResponse;
 import org.apache.hadoop.hbase.protobuf.generated.AggregateProtos.AggregateService;
 import org.apache.hadoop.hbase.quotas.OperationQuota;
+import org.apache.hadoop.hbase.quotas.RpcThrottlingException;
 import org.apache.hadoop.hbase.regionserver.InternalScanner;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.ClientProtos;
 import org.apache.yetus.audience.InterfaceAudience;
@@ -97,7 +98,13 @@ public class AggregateImplementation<T, S, P extends Message, Q extends Message,
       boolean hasMoreRows = false;
       do {
         long maxBlockBytesScanned = quota == null ? Long.MAX_VALUE : quota.getMaxResultSize();
-        quota = env.checkScanQuota(scan, maxBlockBytesScanned, previousReadConsumedDifference);
+        try {
+          quota = env.checkScanQuota(scan, maxBlockBytesScanned, previousReadConsumedDifference);
+        } catch (RpcThrottlingException e) {
+          try {
+            Thread.sleep(e.getWaitInterval());
+          } catch (InterruptedException ignored) {}
+        }
         hasMoreRows = scanner.next(results);
         int listSize = results.size();
         for (int i = 0; i < listSize; i++) {
@@ -153,7 +160,13 @@ public class AggregateImplementation<T, S, P extends Message, Q extends Message,
       boolean hasMoreRows = false;
       do {
         long maxBlockBytesScanned = quota == null ? Long.MAX_VALUE : quota.getMaxResultSize();
-        quota = env.checkScanQuota(scan, maxBlockBytesScanned, previousReadConsumedDifference);
+        try {
+          quota = env.checkScanQuota(scan, maxBlockBytesScanned, previousReadConsumedDifference);
+        } catch (RpcThrottlingException e) {
+          try {
+            Thread.sleep(e.getWaitInterval());
+          } catch (InterruptedException ignored) {}
+        }
         hasMoreRows = scanner.next(results);
         int listSize = results.size();
         for (int i = 0; i < listSize; i++) {
@@ -209,7 +222,13 @@ public class AggregateImplementation<T, S, P extends Message, Q extends Message,
       boolean hasMoreRows = false;
       do {
         long maxBlockBytesScanned = quota == null ? Long.MAX_VALUE : quota.getMaxResultSize();
-        quota = env.checkScanQuota(scan, maxBlockBytesScanned, previousReadConsumedDifference);
+        try {
+          quota = env.checkScanQuota(scan, maxBlockBytesScanned, previousReadConsumedDifference);
+        } catch (RpcThrottlingException e) {
+          try {
+            Thread.sleep(e.getWaitInterval());
+          } catch (InterruptedException ignored) {}
+        }
         hasMoreRows = scanner.next(results);
         int listSize = results.size();
         for (int i = 0; i < listSize; i++) {
@@ -267,7 +286,13 @@ public class AggregateImplementation<T, S, P extends Message, Q extends Message,
       boolean hasMoreRows = false;
       do {
         long maxBlockBytesScanned = quota == null ? Long.MAX_VALUE : quota.getMaxResultSize();
-        quota = env.checkScanQuota(scan, maxBlockBytesScanned, previousReadConsumedDifference);
+        try {
+          quota = env.checkScanQuota(scan, maxBlockBytesScanned, previousReadConsumedDifference);
+        } catch (RpcThrottlingException e) {
+          try {
+            Thread.sleep(e.getWaitInterval());
+          } catch (InterruptedException ignored) {}
+        }
         hasMoreRows = scanner.next(results);
         if (results.size() > 0) {
           counter++;
@@ -325,7 +350,13 @@ public class AggregateImplementation<T, S, P extends Message, Q extends Message,
       do {
         results.clear();
         long maxBlockBytesScanned = quota == null ? Long.MAX_VALUE : quota.getMaxResultSize();
-        quota = env.checkScanQuota(scan, maxBlockBytesScanned, previousReadConsumedDifference);
+        try {
+          quota = env.checkScanQuota(scan, maxBlockBytesScanned, previousReadConsumedDifference);
+        } catch (RpcThrottlingException e) {
+          try {
+            Thread.sleep(e.getWaitInterval());
+          } catch (InterruptedException ignored) {}
+        }
         hasMoreRows = scanner.next(results);
         int listSize = results.size();
         for (int i = 0; i < listSize; i++) {
@@ -387,7 +418,13 @@ public class AggregateImplementation<T, S, P extends Message, Q extends Message,
 
       do {
         long maxBlockBytesScanned = quota == null ? Long.MAX_VALUE : quota.getMaxResultSize();
-        quota = env.checkScanQuota(scan, maxBlockBytesScanned, previousReadConsumedDifference);
+        try {
+          quota = env.checkScanQuota(scan, maxBlockBytesScanned, previousReadConsumedDifference);
+        } catch (RpcThrottlingException e) {
+          try {
+            Thread.sleep(e.getWaitInterval());
+          } catch (InterruptedException ignored) {}
+        }
         tempVal = null;
         hasMoreRows = scanner.next(results);
         int listSize = results.size();
@@ -454,7 +491,13 @@ public class AggregateImplementation<T, S, P extends Message, Q extends Message,
 
       do {
         long maxBlockBytesScanned = quota == null ? Long.MAX_VALUE : quota.getMaxResultSize();
-        quota = env.checkScanQuota(scan, maxBlockBytesScanned, previousReadConsumedDifference);
+        try {
+          quota = env.checkScanQuota(scan, maxBlockBytesScanned, previousReadConsumedDifference);
+        } catch (RpcThrottlingException e) {
+          try {
+            Thread.sleep(e.getWaitInterval());
+          } catch (InterruptedException ignored) {}
+        }
         tempVal = null;
         tempWeight = null;
         hasMoreRows = scanner.next(results);
