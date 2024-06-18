@@ -166,7 +166,6 @@ public class RegionServerRpcQuotaManager implements RpcQuotaManager {
     } else {
       ugi = User.getCurrent().getUGI();
     }
-    LOG.debug("checkScanQuota for user " + ugi.getUserName());
     TableDescriptor tableDescriptor = region.getTableDescriptor();
     TableName table = tableDescriptor.getTableName();
 
