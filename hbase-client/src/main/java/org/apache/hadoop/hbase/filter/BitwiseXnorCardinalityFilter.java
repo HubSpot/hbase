@@ -7,6 +7,7 @@ import org.apache.hadoop.hbase.ExtendedCell;
 import org.apache.hadoop.hbase.ExtendedCellBuilder;
 import org.apache.hadoop.hbase.ExtendedCellBuilderFactory;
 import org.apache.hadoop.hbase.util.Bytes;
+import org.apache.yetus.audience.InterfaceAudience;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.BitSet;
@@ -17,6 +18,7 @@ import java.util.BitSet;
  * Note that this cell must exist in the row in order for the Filter to overwrite its value, so when
  * inserting into the index, include that qualifier in your Put with an empty value.
  */
+@InterfaceAudience.Public
 public class BitwiseXnorCardinalityFilter extends FilterBase {
   private static final byte[] CARDINALITY_FAM = Bytes.toBytes("0");
   private static final byte[] CARDINALITY_QUAL = Bytes.toBytes("cardinality");
