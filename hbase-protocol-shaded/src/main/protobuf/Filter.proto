@@ -178,3 +178,8 @@ message ColumnValueFilter {
   required CompareType compare_op = 3;
   required Comparator comparator = 4;
 }
+
+message BitwiseXnorCardinalityFilter {
+  required int32 offset = 1;
+  required bytes sig = 2;
+}
