@@ -66,7 +66,7 @@ public class BitwiseXnorCardinalityFilter extends FilterBase {
     this.builder = ExtendedCellBuilderFactory.create(CellBuilderType.DEEP_COPY);
   }
 
-  private BitwiseXnorCardinalityFilter(int offset, byte[] sig) {
+  public BitwiseXnorCardinalityFilter(int offset, byte[] sig) {
     this.offset = offset;
     this.sig = BitSet.valueOf(sig);
     this.length = this.sig.length();
