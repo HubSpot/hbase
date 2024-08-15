@@ -29,6 +29,7 @@ import java.util.NavigableSet;
 import java.util.NoSuchElementException;
 import java.util.TreeMap;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicLong;
 import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.client.AdvancedScanResultConsumer;
@@ -212,16 +213,16 @@ public final class AsyncAggregationClient {
     }
     AbstractAggregationCallback<Long> callback = new AbstractAggregationCallback<Long>(future) {
 
-      private long count;
+      private final AtomicLong count = new AtomicLong(0L);
 
       @Override
       protected void aggregate(RegionInfo region, AggregateResponse resp) throws IOException {
-        count += resp.getFirstPart(0).asReadOnlyByteBuffer().getLong();
+        count.addAndGet(resp.getFirstPart(0).asReadOnlyByteBuffer().getLong());
       }
 
       @Override
       protected Long getFinalResult() {
-        return count;
+        return count.get();
       }
     };
     table
