@@ -22,6 +22,8 @@ import static org.apache.hadoop.hbase.client.coprocessor.AggregationHelper.valid
 import static org.apache.hadoop.hbase.util.FutureUtils.addListener;
 
 import com.google.protobuf.Message;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.util.Map;
 import java.util.NavigableMap;
@@ -53,6 +55,9 @@ import org.apache.yetus.audience.InterfaceAudience;
  */
 @InterfaceAudience.Public
 public final class AsyncAggregationClient {
+
+  private static final Logger LOG = LoggerFactory.getLogger(AsyncAggregationClient.class);
+
   private AsyncAggregationClient() {
   }
 
@@ -217,12 +222,16 @@ public final class AsyncAggregationClient {
 
       @Override
       protected void aggregate(RegionInfo region, AggregateResponse resp) throws IOException {
-        count.addAndGet(resp.getFirstPart(0).asReadOnlyByteBuffer().getLong());
+        long part = resp.getFirstPart(0).asReadOnlyByteBuffer().getLong();
+        LOG.trace("Got row count part {} for scan {} in region {}", part, req.getScan(), region.getEncodedName());
+        count.addAndGet(part);
       }
 
       @Override
       protected Long getFinalResult() {
-        return count.get();
+        long result = count.get();
+        LOG.trace("Returning final count {}", result);
+        return result;
       }
     };
     table
