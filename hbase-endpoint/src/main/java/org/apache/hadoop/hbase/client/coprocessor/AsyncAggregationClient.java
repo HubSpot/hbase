@@ -230,7 +230,7 @@ public final class AsyncAggregationClient {
       @Override
       protected Long getFinalResult() {
         long result = count.get();
-        LOG.trace("Returning final count {}", result);
+        LOG.trace("Returning final count {} for scan {}", result, req.getScan());
         return result;
       }
     };
