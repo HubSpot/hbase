@@ -855,13 +855,15 @@ class RawAsyncTableImpl implements AsyncTable<AdvancedScanResultConsumer> {
     }
     addListener(coprocessorService(stubMaker, callable, region, region.getStartKey()), (r, e) -> {
       try (Scope ignored = span.makeCurrent()) {
-        if (e != null) {
-          callback.onRegionError(region, e);
-        } else {
-          callback.onRegionComplete(region, r);
-        }
-        if (unfinishedRequest.decrementAndGet() == 0 && locateFinished.get()) {
-          callback.onComplete();
+        synchronized (unfinishedRequest) {
+          if (e != null) {
+            callback.onRegionError(region, e);
+          } else {
+            callback.onRegionComplete(region, r);
+          }
+          if (unfinishedRequest.decrementAndGet() == 0 && locateFinished.get()) {
+            callback.onComplete();
+          }
         }
       }
     });

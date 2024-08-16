@@ -223,14 +223,19 @@ public final class AsyncAggregationClient {
       @Override
       protected void aggregate(RegionInfo region, AggregateResponse resp) throws IOException {
         long part = resp.getFirstPart(0).asReadOnlyByteBuffer().getLong();
-        LOG.trace("Got row count part {} for scan {} in region {}", part, req.getScan(), region.getEncodedName());
+        if (LOG.isTraceEnabled()) {
+          LOG.trace("Got row count part {} for scan {} in region {}", part, req.getScan(),
+            region.getEncodedName());
+        }
         count.addAndGet(part);
       }
 
       @Override
       protected Long getFinalResult() {
         long result = count.get();
-        LOG.trace("Returning final count {} for scan {}", result, req.getScan());
+        if (LOG.isTraceEnabled()) {
+          LOG.trace("Returning final count {} for scan {}", result, req.getScan());
+        }
         return result;
       }
     };
