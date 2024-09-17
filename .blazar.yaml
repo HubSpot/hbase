@@ -1,5 +1,6 @@
 buildpack:
   name: Blazar-Buildpack-Java-single-module
+  branch: java-centos-8
 
 env:
   MAVEN_PHASE: "package assembly:single deploy"
