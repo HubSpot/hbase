@@ -89,14 +89,12 @@ public class HFileLink extends FileLink {
   private final Path archivePath;
   private final Path originPath;
   private final Path mobPath;
-  private final Path tempPath;
 
   /**
    * Dead simple hfile link constructor
    */
   public HFileLink(final Path originPath, final Path tempPath, final Path mobPath,
     final Path archivePath) {
-    this.tempPath = tempPath;
     this.originPath = originPath;
     this.mobPath = mobPath;
     this.archivePath = archivePath;
@@ -188,6 +186,12 @@ public class HFileLink extends FileLink {
    * @return True if the path is a HFileLink.
    */
   public static boolean isHFileLink(String fileName) {
+    // The regex evaluation below is not computationally trivial, so see if we can fast-fail
+    // on a simple heuristic first.
+    if (!fileName.contains("=")) {
+      return false;
+    }
+
     Matcher m = LINK_NAME_PATTERN.matcher(fileName);
     if (!m.matches()) {
       return false;
