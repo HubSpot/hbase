@@ -606,6 +606,7 @@ public class BucketCache implements BlockCache, HeapSize {
       successfulAddition = bq.offer(re);
     }
     if (!successfulAddition) {
+      LOG.debug("Failed to insert block {} into the cache writers queue", cacheKey);
       ramCache.remove(cacheKey);
       cacheStats.failInsert();
     } else {
@@ -853,7 +854,7 @@ public class BucketCache implements BlockCache, HeapSize {
    *   it is {@link ByteBuffAllocator#putbackBuffer}.
    * </pre>
    */
-  private Recycler createRecycler(final BucketEntry bucketEntry) {
+  public Recycler createRecycler(final BucketEntry bucketEntry) {
     return () -> {
       freeBucketEntry(bucketEntry);
       return;
