@@ -56,7 +56,6 @@ import org.apache.hadoop.hbase.snapshot.SnapshotRegionLocator;
 import org.apache.hadoop.hbase.util.CommonFSUtils;
 import org.apache.hadoop.hbase.util.HFileArchiveUtil;
 import org.apache.hadoop.hbase.wal.AbstractFSWALProvider;
-import org.apache.hadoop.mapreduce.lib.input.InvalidInputException;
 import org.apache.hadoop.util.Tool;
 import org.apache.yetus.audience.InterfaceAudience;
 import org.slf4j.Logger;
@@ -189,15 +188,15 @@ public class IncrementalTableBackupClient extends TableBackupClient {
       LOG.info("Merging and splitting bulk loaded files for table {}", bulkloadInfo.getSrcTable());
       LOG.info("Active files: {}", bulkloadInfo.getActiveFiles());
       LOG.info("Archive files: {}", bulkloadInfo.getArchiveFiles());
-      mergeSplitBulkloads(bulkloadInfo);
-      incrementalCopyBulkloadHFiles(tgtFs, bulkloadInfo.getSrcTable());
+      mergeSplitAndCopyBulkloads(bulkloadInfo, tgtFs);
     }
 
     LOG.info("Done handling bulkloads");
     return bulkLoads;
   }
 
-  private void mergeSplitBulkloads(MergeSplitBulkloadInfo bulkload) throws IOException {
+  private void mergeSplitAndCopyBulkloads(MergeSplitBulkloadInfo bulkload, FileSystem tgtFs)
+    throws IOException {
     int attempt = 1;
     Set<String> activeFiles = bulkload.getActiveFiles();
     Set<String> archiveFiles = bulkload.getArchiveFiles();
@@ -208,7 +207,7 @@ public class IncrementalTableBackupClient extends TableBackupClient {
       // Active file can be archived during copy operation,
       // we need to handle this properly
       try {
-        mergeSplitBulkloads(activeFiles, tn);
+        mergeSplitAndCopyBulkloads(activeFiles, tn, tgtFs);
         break;
       } catch (IOException e) {
         int numActiveFiles = activeFiles.size();
@@ -223,11 +222,12 @@ public class IncrementalTableBackupClient extends TableBackupClient {
     }
 
     if (!archiveFiles.isEmpty()) {
-      mergeSplitBulkloads(archiveFiles, tn);
+      mergeSplitAndCopyBulkloads(archiveFiles, tn, tgtFs);
     }
   }
 
-  private void mergeSplitBulkloads(Set<String> files, TableName tn) throws IOException {
+  private void mergeSplitAndCopyBulkloads(Set<String> files, TableName tn, FileSystem tgtFs)
+    throws IOException {
     MapReduceHFileSplitterJob player = new MapReduceHFileSplitterJob();
     conf.set(MapReduceHFileSplitterJob.BULK_OUTPUT_CONF_KEY,
       getBulkOutputDirForTable(tn).toString());
@@ -249,6 +249,8 @@ public class IncrementalTableBackupClient extends TableBackupClient {
       throw new IOException(
         "Failed to run MapReduceHFileSplitterJob with invalid result: " + result);
     }
+
+    incrementalCopyBulkloadHFiles(tgtFs, tn);
   }
 
   private void updateFileLists(Set<String> activeFiles, Set<String> archiveFiles, TableName tn)
