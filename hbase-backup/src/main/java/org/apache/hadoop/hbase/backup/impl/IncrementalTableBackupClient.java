@@ -19,6 +19,7 @@ package org.apache.hadoop.hbase.backup.impl;
 
 import static org.apache.hadoop.hbase.backup.BackupRestoreConstants.JOB_NAME_CONF_KEY;
 
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URISyntaxException;
@@ -182,16 +183,10 @@ public class IncrementalTableBackupClient extends TableBackupClient {
       toBulkload.put(srcTable, bulkloadInfo);
     }
 
-    LOG.info("Found {} bulk loaded files to copy", toBulkload.size());
-
     for (MergeSplitBulkloadInfo bulkloadInfo : toBulkload.values()) {
-      LOG.info("Merging and splitting bulk loaded files for table {}", bulkloadInfo.getSrcTable());
-      LOG.info("Active files: {}", bulkloadInfo.getActiveFiles());
-      LOG.info("Archive files: {}", bulkloadInfo.getArchiveFiles());
       mergeSplitAndCopyBulkloads(bulkloadInfo, tgtFs);
     }
 
-    LOG.info("Done handling bulkloads");
     return bulkLoads;
   }
 
@@ -280,6 +275,26 @@ public class IncrementalTableBackupClient extends TableBackupClient {
     }
 
     LOG.debug(newlyArchived.size() + " files have been archived.");
+  }
+
+  private void updateWalFiles(Set<String> activeWals, Set<String> oldWals) throws IOException {
+    Set<String> newlyArchived = new HashSet<>();
+    Set<String> toRemove = new HashSet<>();
+
+    for (String wal : activeWals) {
+      if (!fs.exists(new Path(wal))) {
+        toRemove.add(wal);
+
+        String oldWal = wal.replace("/WALs", "/oldWALs");
+        LOG.info("Adding archived wal: {}", oldWal);
+        newlyArchived.add(oldWal);
+      }
+    }
+
+    if (!newlyArchived.isEmpty()) {
+      activeWals.removeAll(toRemove);
+      oldWals.addAll(newlyArchived);
+    }
   }
 
   /**
@@ -412,8 +427,38 @@ public class IncrementalTableBackupClient extends TableBackupClient {
         LOG.warn("Table " + table + " does not exists. Skipping in WAL converter");
       }
     }
-    walToHFiles(incrBackupFileList, tableList);
 
+    Set<String> activeWals = new HashSet<>();
+    Set<String> oldWals = new HashSet<>();
+
+    for (String wal : incrBackupFileList) {
+      if (fs.exists(new Path(wal))) {
+        activeWals.add(wal);
+      } else {
+        String oldWal = wal.replace("/WALs", "/oldWALs");
+        oldWals.add(oldWal);
+      }
+    }
+
+    while (!activeWals.isEmpty()) {
+      try {
+        walToHFiles(activeWals, tableList);
+        break;
+      } catch (FileNotFoundException e) {
+        int numActiveWals = activeWals.size();
+        updateWalFiles(activeWals, oldWals);
+        if (activeWals.size() < numActiveWals) {
+          continue;
+        }
+
+        LOG.error("Throwing because we didn't add any archive files!");
+        throw e;
+      }
+    }
+
+    if (!oldWals.isEmpty()) {
+      walToHFiles(oldWals, tableList);
+    }
   }
 
   protected boolean tableExists(TableName table, Connection conn) throws IOException {
@@ -422,7 +467,7 @@ public class IncrementalTableBackupClient extends TableBackupClient {
     }
   }
 
-  protected void walToHFiles(List<String> dirPaths, List<String> tableList) throws IOException {
+  protected void walToHFiles(Set<String> dirPaths, List<String> tableList) throws IOException {
     Tool player = new WALPlayer();
 
     // Player reads all files in arbitrary directory structure and creates
