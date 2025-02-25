@@ -31,10 +31,12 @@ import java.util.Map;
 import java.util.Set;
 import org.apache.commons.io.FilenameUtils;
 import org.apache.commons.lang3.StringUtils;
+import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.LocatedFileStatus;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.fs.RemoteIterator;
+import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.backup.BackupCopyJob;
 import org.apache.hadoop.hbase.backup.BackupInfo;
@@ -285,7 +287,7 @@ public class IncrementalTableBackupClient extends TableBackupClient {
       if (!fs.exists(new Path(wal))) {
         toRemove.add(wal);
 
-        String oldWal = wal.replace("/WALs", "/oldWALs");
+        String oldWal = toOldWalName(wal, conf);
         LOG.info("Adding archived wal: {}", oldWal);
         newlyArchived.add(oldWal);
       }
@@ -433,7 +435,7 @@ public class IncrementalTableBackupClient extends TableBackupClient {
       if (fs.exists(new Path(wal))) {
         activeWals.add(wal);
       } else {
-        String oldWal = wal.replace("/WALs", "/oldWALs");
+        String oldWal = toOldWalName(wal, conf);
         oldWals.add(oldWal);
       }
     }
@@ -642,5 +644,13 @@ public class IncrementalTableBackupClient extends TableBackupClient {
     }
 
     return true;
+  }
+
+  private static String toOldWalName(String wal, Configuration conf) throws IOException {
+    int idx = wal.lastIndexOf('/');
+    String underlyingWalName = wal.substring(idx + 1);
+
+    Path root = new Path(CommonFSUtils.getWALRootDir(conf), HConstants.HREGION_OLDLOGDIR_NAME);
+    return new Path(root, underlyingWalName).toString();
   }
 }
