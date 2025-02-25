@@ -328,9 +328,7 @@ public class IncrementalTableBackupClient extends TableBackupClient {
       BackupUtils.copyTableRegionInfo(conn, backupInfo, conf);
       setupRegionLocator();
       // convert WAL to HFiles and copy them to .tmp under BACKUP_ROOT
-      convertWALsToHFiles();
-      incrementalCopyHFiles(new String[] { getBulkOutputDir().toString() },
-        backupInfo.getBackupRootDir());
+      convertWALsToHFilesAndCopy();
     } catch (Exception e) {
       String msg = "Unexpected exception in incremental-backup: incremental copy " + backupId;
       // fail the overall backup and return
@@ -411,7 +409,7 @@ public class IncrementalTableBackupClient extends TableBackupClient {
     }
   }
 
-  protected void convertWALsToHFiles() throws IOException {
+  protected void convertWALsToHFilesAndCopy() throws IOException {
     // get incremental backup file list and prepare parameters for DistCp
     List<String> incrBackupFileList = backupInfo.getIncrBackupFileList();
     // Get list of tables in incremental backup set
@@ -443,6 +441,8 @@ public class IncrementalTableBackupClient extends TableBackupClient {
     while (!activeWals.isEmpty()) {
       try {
         walToHFiles(activeWals, tableList);
+        incrementalCopyHFiles(new String[] { getBulkOutputDir().toString() },
+          backupInfo.getBackupRootDir());
         break;
       } catch (FileNotFoundException e) {
         int numActiveWals = activeWals.size();
@@ -458,6 +458,8 @@ public class IncrementalTableBackupClient extends TableBackupClient {
 
     if (!oldWals.isEmpty()) {
       walToHFiles(oldWals, tableList);
+      incrementalCopyHFiles(new String[] { getBulkOutputDir().toString() },
+        backupInfo.getBackupRootDir());
     }
   }
 
