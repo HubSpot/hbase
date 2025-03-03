@@ -42,6 +42,8 @@ public class BufferedMutatorParams implements Cloneable {
   private int rpcTimeout = UNSET;
   private int operationTimeout = UNSET;
   protected Map<String, byte[]> requestAttributes = Collections.emptyMap();
+  private int maxMutations = UNSET;
+
   private BufferedMutator.ExceptionListener listener = new BufferedMutator.ExceptionListener() {
     @Override
     public void onException(RetriesExhaustedWithDetailsException exception,
@@ -99,6 +101,23 @@ public class BufferedMutatorParams implements Cloneable {
 
   public Map<String, byte[]> getRequestAttributes() {
     return requestAttributes;
+  }
+
+  /**
+   * Set the maximum number of mutations that this buffered mutator will buffer before flushing
+   * them. If you are talking to a cluster that uses hbase.rpc.rows.size.threshold.reject to reject
+   * large Multi requests, you may need this setting to avoid rejections. Default is no limit.
+   */
+  public BufferedMutatorParams setMaxMutations(int maxMutations) {
+    this.maxMutations = maxMutations;
+    return this;
+  }
+
+  /**
+   * The maximum number of mutations that this buffered mutator will buffer before flushing them
+   */
+  public int getMaxMutations() {
+    return maxMutations;
   }
 
   /**
@@ -204,6 +223,7 @@ public class BufferedMutatorParams implements Cloneable {
     clone.writeBufferPeriodicFlushTimeoutMs = this.writeBufferPeriodicFlushTimeoutMs;
     clone.writeBufferPeriodicFlushTimerTickMs = this.writeBufferPeriodicFlushTimerTickMs;
     clone.maxKeyValueSize = this.maxKeyValueSize;
+    clone.maxMutations = this.maxMutations;
     clone.pool = this.pool;
     clone.listener = this.listener;
     clone.implementationClassName = this.implementationClassName;
