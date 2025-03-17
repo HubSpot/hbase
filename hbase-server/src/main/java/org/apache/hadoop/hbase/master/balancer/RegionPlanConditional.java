@@ -73,6 +73,8 @@ public abstract class RegionPlanConditional {
    */
   abstract List<RegionPlanConditionalCandidateGenerator> getCandidateGenerators();
 
+  abstract String getConditionalName();
+
   /**
    * Check if the conditional is violated by the given region plan.
    * @param regionPlan the region plan to check
@@ -92,6 +94,9 @@ public abstract class RegionPlanConditional {
       serverRegions.add(cluster.regions[regionIdx]);
     }
     if (isViolatingServer(regionPlan, serverRegions)) {
+      if (LOG.isTraceEnabled()) {
+        LOG.trace("Conditional {} violated: SERVER check failed by region plan {}", getConditionalName(), regionPlan);
+      }
       return true;
     }
 
@@ -103,6 +108,9 @@ public abstract class RegionPlanConditional {
     int hostIdx = cluster.serverIndexToHostIndex[destinationServerIdx];
     Set<RegionInfo> hostRegions = getRegionsFromIndex(hostIdx, cluster.regionsPerHost);
     if (isViolatingHost(regionPlan, hostRegions)) {
+      if (LOG.isTraceEnabled()) {
+        LOG.trace("Conditional {} violated: HOST check failed by region plan {}", getConditionalName(), regionPlan);
+      }
       return true;
     }
 
@@ -114,6 +122,9 @@ public abstract class RegionPlanConditional {
     int rackIdx = cluster.serverIndexToRackIndex[destinationServerIdx];
     Set<RegionInfo> rackRegions = getRegionsFromIndex(rackIdx, cluster.regionsPerRack);
     if (isViolatingRack(regionPlan, rackRegions)) {
+      if (LOG.isTraceEnabled()) {
+        LOG.trace("Conditional {} violated: RACK check failed by region plan {}", getConditionalName(), regionPlan);
+      }
       return true;
     }
 
