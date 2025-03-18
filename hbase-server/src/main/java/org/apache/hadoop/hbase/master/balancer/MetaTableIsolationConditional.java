@@ -35,4 +35,9 @@ class MetaTableIsolationConditional extends TableIsolationConditional {
   boolean isRegionToIsolate(RegionInfo regionInfo) {
     return regionInfo.isMetaRegion();
   }
+
+  @Override
+  String getConditionalName() {
+    return "MetaTableIsolationConditional";
+  }
 }

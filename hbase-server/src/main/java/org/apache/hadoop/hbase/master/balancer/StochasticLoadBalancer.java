@@ -690,6 +690,12 @@ public class StochasticLoadBalancer extends BaseLoadBalancer {
       if (action.getType() == BalanceAction.Type.NULL) {
         continue;
       }
+      if (action instanceof MoveBatchAction) {
+        MoveBatchAction moveBatchAction = (MoveBatchAction) action;
+        if (moveBatchAction.getMoveActions().isEmpty()) {
+          continue;
+        }
+      }
 
       int conditionalViolationsChange = 0;
       boolean isViolatingConditionals = false;
@@ -702,10 +708,18 @@ public class StochasticLoadBalancer extends BaseLoadBalancer {
         // Otherwise, for normal moves, evaluate the action.
         if (RegionPlanConditionalCandidateGenerator.class.isAssignableFrom(generator.getClass())) {
           conditionalViolationsChange = -1;
+          if (LOG.isDebugEnabled()) {
+            LOG.debug("Conditional generator {} produced action {}", generator.getClass().getSimpleName(),
+              action);
+          }
         } else {
           conditionalViolationsChange =
             balancerConditionals.getViolationCountChange(cluster, action);
           isViolatingConditionals = balancerConditionals.isViolating(cluster, action);
+          if (LOG.isDebugEnabled() && conditionalViolationsChange < 0) {
+            LOG.debug("Standard generator {} produced action {} which reduced conditional violations. Plan {} conditionals.", generator.getClass().getSimpleName(),
+              action, isViolatingConditionals ? "still violates some" : "respects all");
+          }
         }
         moveImprovedConditionals = conditionalViolationsChange < 0;
         if (moveImprovedConditionals) {

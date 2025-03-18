@@ -56,6 +56,11 @@ public class DistributeReplicasConditional extends RegionPlanConditional {
   }
 
   @Override
+  String getConditionalName() {
+    return "DistributeReplicasConditional";
+  }
+
+  @Override
   boolean isViolatingServer(RegionPlan regionPlan, Set<RegionInfo> serverRegions) {
     return checkViolation(regionPlan.getRegionInfo(), getReplicaKey(regionPlan.getRegionInfo()),
       serverRegions);

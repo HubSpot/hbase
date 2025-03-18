@@ -40,4 +40,9 @@ public class SystemTableIsolationConditional extends TableIsolationConditional {
     }
     return regionInfo.getTable().isSystemTable();
   }
+
+  @Override
+  String getConditionalName() {
+    return "SystemTableIsolationConditional";
+  }
 }
