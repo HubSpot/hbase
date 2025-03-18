@@ -17,6 +17,7 @@
  */
 package org.apache.hadoop.hbase.backup.impl;
 
+import com.google.errorprone.annotations.RestrictedApi;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -44,7 +45,6 @@ import org.slf4j.LoggerFactory;
 import org.apache.hadoop.hbase.shaded.protobuf.ProtobufUtil;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.BackupProtos;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.HBaseProtos;
-import com.google.errorprone.annotations.RestrictedApi;
 
 /**
  * Backup manifest contains all the meta data of a backup image. The manifest info will be bundled
@@ -567,7 +567,7 @@ public class BackupManifest {
 
   /* Visible for testing only */
   @RestrictedApi(explanation = "Should only be called internally or in tests", link = "",
-    allowedOnPath = "(.*/src/test/.*|.*/org/apache/hadoop/hbase/backup/impl/BackupManifest.java)")
+      allowedOnPath = "(.*/src/test/.*|.*/org/apache/hadoop/hbase/backup/impl/BackupManifest.java)")
   public static BackupImage hydrateRootDir(BackupImage backupImage, Path backupPath)
     throws IOException {
     String providedRootDir =

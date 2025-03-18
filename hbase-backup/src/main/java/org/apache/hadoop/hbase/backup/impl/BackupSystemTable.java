@@ -42,6 +42,7 @@ import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.CellUtil;
 import org.apache.hadoop.hbase.HBaseConfiguration;
+import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.NamespaceDescriptor;
 import org.apache.hadoop.hbase.NamespaceExistException;
 import org.apache.hadoop.hbase.ServerName;
@@ -421,14 +422,24 @@ public final class BackupSystemTable implements Closeable {
    * @param rows the rows to be deleted
    */
   public void deleteBulkLoadedRows(List<byte[]> rows) throws IOException {
+    int rowSizeWarnThreshold = connection.getConfiguration()
+      .getInt(HConstants.BATCH_ROWS_THRESHOLD_NAME, HConstants.BATCH_ROWS_THRESHOLD_DEFAULT);
     try (Table table = connection.getTable(bulkLoadTableName)) {
       List<Delete> lstDels = new ArrayList<>();
       for (byte[] row : rows) {
         Delete del = new Delete(row);
         lstDels.add(del);
         LOG.debug("orig deleting the row: " + Bytes.toString(row));
+
+        if (lstDels.size() >= rowSizeWarnThreshold) {
+          table.delete(lstDels);
+          lstDels.clear();
+        }
       }
-      table.delete(lstDels);
+
+      if (!lstDels.isEmpty()) {
+        table.delete(lstDels);
+      }
       LOG.debug("deleted " + rows.size() + " original bulkload rows");
     }
   }
