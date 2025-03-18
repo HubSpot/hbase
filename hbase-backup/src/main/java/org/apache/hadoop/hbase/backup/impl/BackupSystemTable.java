@@ -428,6 +428,7 @@ public final class BackupSystemTable implements Closeable {
 
         if (lstDels.size() >= rowSizeWarnThreshold) {
           bufferedMutator.mutate(lstDels);
+          bufferedMutator.flush();
           lstDels.clear();
         }
         LOG.debug("orig deleting the row: " + Bytes.toString(row));
