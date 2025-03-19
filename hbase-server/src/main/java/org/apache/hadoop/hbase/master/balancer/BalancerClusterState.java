@@ -96,6 +96,7 @@ class BalancerClusterState {
   int[] numMaxRegionsPerTable; // tableIndex -> max number of regions in a single RS
   int[] regionIndexToPrimaryIndex; // regionIndex -> regionIndex of the primary
   boolean hasRegionReplicas = false; // whether there is regions with replicas
+  public long[][] storeFileSizePerServerPerTable; // tableIndex -> serverIndex -> store file size
 
   Integer[] serverIndicesSortedByRegionCount;
   Integer[] serverIndicesSortedByLocality;
@@ -352,6 +353,16 @@ class BalancerClusterState {
       if (regionIndexToServerIndex[i] >= 0) {
         numRegionsPerServerPerTable[regionIndexToTableIndex[i]][regionIndexToServerIndex[i]]++;
         numRegionsPerTable[regionIndexToTableIndex[i]]++;
+      }
+    }
+
+    storeFileSizePerServerPerTable = new long[numTables][numServers];
+    for (int tableIdx = 0; tableIdx < numTables; tableIdx++) {
+      for (int serverIdx = 0; serverIdx < numServers; serverIdx++) {
+        for (int regionIdx : regionsPerServer[serverIdx]) {
+          long regionSizeMb = getRegionSizeMB(regionIdx);
+          storeFileSizePerServerPerTable[tableIdx][serverIdx] = regionSizeMb;
+        }
       }
     }
 
@@ -864,6 +875,8 @@ class BalancerClusterState {
     }
     numRegionsPerServerPerTable[tableIndex][newServer]++;
 
+    updateStoreFileSize(region, oldServer, newServer);
+
     // update for servers
     int primary = regionIndexToPrimaryIndex[region];
     if (oldServer >= 0) {
@@ -881,6 +894,27 @@ class BalancerClusterState {
     if (numRacks > 1) {
       updateForLocation(serverIndexToRackIndex, regionsPerRack, colocatedReplicaCountsPerRack,
         oldServer, newServer, primary, region);
+    }
+  }
+
+  /**
+   * Helper method to update the store file load for a region that has been moved.
+   * The region's table index is calculated, and then the region's store file size
+   * is subtracted from the source server (if applicable) and added to the destination server.
+   *
+   * @param region       The index of the region that has been moved.
+   * @param oldServer    The source server index (-1 for assignment).
+   * @param newServer    The destination server index.
+   */
+  private void updateStoreFileSize(int region, int oldServer, int newServer) {
+    int tableIdx = regionIndexToTableIndex[region];
+    long regionStoreSize = getRegionSizeMB(region);
+    if (oldServer != -1 && storeFileSizePerServerPerTable != null) {
+      storeFileSizePerServerPerTable[tableIdx][oldServer] =
+        Math.max(0, storeFileSizePerServerPerTable[tableIdx][oldServer] - regionStoreSize);
+    }
+    if (storeFileSizePerServerPerTable != null) {
+      storeFileSizePerServerPerTable[tableIdx][newServer] += regionStoreSize;
     }
   }
 
