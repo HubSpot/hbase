@@ -71,6 +71,8 @@ public interface QuotaLimiter {
    */
   void consumeRead(long size, long capacityUnit);
 
+  void consumeHandlerTimeMs(long timeMs);
+
   /** Returns true if the limiter is a noop */
   boolean isBypass();
 

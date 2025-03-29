@@ -44,6 +44,7 @@ public class TimeBasedLimiter implements QuotaLimiter {
   private RateLimiter readCapacityUnitLimiter = null;
   private RateLimiter atomicReqLimiter = null;
   private RateLimiter atomicReadSizeLimiter = null;
+  private RateLimiter handlerTimeMsLimiter = null;
 
   private TimeBasedLimiter() {
     if (
@@ -64,6 +65,7 @@ public class TimeBasedLimiter implements QuotaLimiter {
       readCapacityUnitLimiter = new FixedIntervalRateLimiter(refillInterval);
       atomicReqLimiter = new FixedIntervalRateLimiter(refillInterval);
       atomicReadSizeLimiter = new FixedIntervalRateLimiter(refillInterval);
+      handlerTimeMsLimiter = new FixedIntervalRateLimiter(refillInterval);
     } else {
       reqsLimiter = new AverageIntervalRateLimiter();
       reqSizeLimiter = new AverageIntervalRateLimiter();
@@ -76,6 +78,7 @@ public class TimeBasedLimiter implements QuotaLimiter {
       readCapacityUnitLimiter = new AverageIntervalRateLimiter();
       atomicReqLimiter = new AverageIntervalRateLimiter();
       atomicReadSizeLimiter = new AverageIntervalRateLimiter();
+      handlerTimeMsLimiter = new AverageIntervalRateLimiter();
     }
   }
 
@@ -137,6 +140,11 @@ public class TimeBasedLimiter implements QuotaLimiter {
       isBypass = false;
     }
 
+    if (throttle.hasHandlerTimeMs()) {
+      setFromTimedQuota(limiter.handlerTimeMsLimiter, throttle.getHandlerTimeMs());
+      isBypass = false;
+    }
+
     return isBypass ? NoopQuotaLimiter.get() : limiter;
   }
 
@@ -152,6 +160,7 @@ public class TimeBasedLimiter implements QuotaLimiter {
     readCapacityUnitLimiter.update(other.readCapacityUnitLimiter);
     atomicReqLimiter.update(other.atomicReqLimiter);
     atomicReadSizeLimiter.update(other.atomicReadSizeLimiter);
+    handlerTimeMsLimiter.update(other.handlerTimeMsLimiter);
   }
 
   private static void setFromTimedQuota(final RateLimiter limiter, final TimedQuota timedQuota) {

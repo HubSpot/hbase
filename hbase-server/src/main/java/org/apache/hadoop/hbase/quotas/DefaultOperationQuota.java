@@ -19,12 +19,14 @@ package org.apache.hadoop.hbase.quotas;
 
 import java.util.Arrays;
 import java.util.List;
+import java.util.Optional;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.client.Mutation;
 import org.apache.hadoop.hbase.client.Result;
 import org.apache.hadoop.hbase.ipc.RpcCall;
 import org.apache.hadoop.hbase.ipc.RpcServer;
+import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
 import org.apache.yetus.audience.InterfaceAudience;
 import org.apache.yetus.audience.InterfaceStability;
 
@@ -50,6 +52,7 @@ public class DefaultOperationQuota implements OperationQuota {
   protected long readConsumed = 0;
   protected long writeCapacityUnitConsumed = 0;
   protected long readCapacityUnitConsumed = 0;
+  protected long handlerTimeMsConsumed = 0;
   // real consumed quota
   private final long[] operationSize;
   // difference between estimated quota and real consumed quota used in close method
@@ -59,6 +62,7 @@ public class DefaultOperationQuota implements OperationQuota {
   protected long readDiff = 0;
   protected long writeCapacityUnitDiff = 0;
   protected long readCapacityUnitDiff = 0;
+  protected long handlerTimeMsDiff = 0;
   private boolean useResultSizeBytes;
   private long blockSizeBytes;
   private long maxScanEstimate;
@@ -140,11 +144,12 @@ public class DefaultOperationQuota implements OperationQuota {
 
     long resultSize =
       operationSize[OperationType.GET.ordinal()] + operationSize[OperationType.SCAN.ordinal()];
+    Optional<RpcCall> call = RpcServer.getCurrentCall();
     if (useResultSizeBytes) {
       readDiff = resultSize - readConsumed;
     } else {
       long blockBytesScanned =
-        RpcServer.getCurrentCall().map(RpcCall::getBlockBytesScanned).orElse(0L);
+        call.map(RpcCall::getBlockBytesScanned).orElse(0L);
       readDiff = Math.max(blockBytesScanned, resultSize) - readConsumed;
     }
 
@@ -154,12 +159,20 @@ public class DefaultOperationQuota implements OperationQuota {
       operationSize[OperationType.GET.ordinal()] + operationSize[OperationType.SCAN.ordinal()],
       readConsumed);
 
+    if (call.isPresent()) {
+      long handlerTimeMs = EnvironmentEdgeManager.currentTime() - call.get().getStartTime();
+      handlerTimeMsDiff = handlerTimeMs - handlerTimeMsConsumed;
+    }
+
     for (final QuotaLimiter limiter : limiters) {
       if (writeDiff != 0) {
         limiter.consumeWrite(writeDiff, writeCapacityUnitDiff);
       }
       if (readDiff != 0) {
         limiter.consumeRead(readDiff, readCapacityUnitDiff);
+      }
+      if (handlerTimeMsDiff != 0) {
+        limiter.consumeHandlerTimeMs(handlerTimeMsDiff);
       }
     }
   }
