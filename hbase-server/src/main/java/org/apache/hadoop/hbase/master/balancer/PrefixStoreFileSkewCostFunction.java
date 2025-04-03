@@ -1,9 +1,9 @@
 package org.apache.hadoop.hbase.master.balancer;
 
-import com.sun.org.slf4j.internal.Logger;
-import com.sun.org.slf4j.internal.LoggerFactory;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.yetus.audience.InterfaceAudience;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 @InterfaceAudience.Private public class PrefixStoreFileSkewCostFunction
   extends CostFromPrefixLoadFunction {
