@@ -14,6 +14,9 @@ public class PrefixStoreFileSkewCostFunction extends CostFromPrefixLoadFunction 
     this.setMultiplier(
         conf.getFloat(STOREFILE_SIZE_COST_KEY, DEFAULT_STOREFILE_SIZE_COST)
       );
+
+    // TODO: remove this so we use what's in config
+    this.setMultiplier(50);
   }
 
   @Override
