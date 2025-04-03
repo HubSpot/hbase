@@ -1,7 +1,9 @@
 package org.apache.hadoop.hbase.master.balancer;
 
 import org.apache.hadoop.conf.Configuration;
+import org.apache.yetus.audience.InterfaceAudience;
 
+@InterfaceAudience.Private
 public class PrefixStoreFileSkewCostFunction extends CostFromPrefixLoadFunction {
 
   private static final String STOREFILE_SIZE_COST_KEY =

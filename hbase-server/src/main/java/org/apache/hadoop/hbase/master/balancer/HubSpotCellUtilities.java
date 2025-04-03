@@ -5,12 +5,12 @@ import java.lang.reflect.Type;
 import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
-
 import org.agrona.collections.Int2IntCounterMap;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.client.RegionInfo;
 import org.apache.hadoop.hbase.client.RegionInfoBuilder;
 import org.apache.hadoop.hbase.util.Bytes;
+import org.apache.yetus.audience.InterfaceAudience;
 import org.apache.hbase.thirdparty.com.google.common.collect.ImmutableSet;
 import org.apache.hbase.thirdparty.com.google.gson.ExclusionStrategy;
 import org.apache.hbase.thirdparty.com.google.gson.FieldAttributes;
@@ -25,6 +25,7 @@ import org.apache.hbase.thirdparty.com.google.gson.JsonParseException;
 import org.apache.hbase.thirdparty.com.google.gson.JsonSerializationContext;
 import org.apache.hbase.thirdparty.com.google.gson.JsonSerializer;
 
+@InterfaceAudience.Private
 public final class HubSpotCellUtilities {
 
   // TODO: this should be dynamically configured, not hard-coded, but this dramatically simplifies the initial version
