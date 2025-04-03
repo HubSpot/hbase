@@ -1,5 +1,9 @@
 package org.apache.hadoop.hbase.master.balancer;
 
+import org.apache.hadoop.hbase.client.RegionInfo;
+import org.apache.hbase.thirdparty.com.google.common.collect.HashMultimap;
+import org.apache.hbase.thirdparty.com.google.common.collect.Multimap;
+import org.apache.hbase.thirdparty.com.google.common.util.concurrent.AtomicDouble;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
@@ -7,21 +11,17 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
-import org.apache.hadoop.hbase.client.RegionInfo;
-import org.apache.hbase.thirdparty.com.google.common.collect.HashMultimap;
-import org.apache.hbase.thirdparty.com.google.common.collect.Multimap;
-import org.apache.hbase.thirdparty.com.google.common.util.concurrent.AtomicDouble;
 
 /**
  * Base class the allows writing costs functions from rolling average of some number from
- * cell load.
+ * prefix load.
  */
 abstract class CostFromPrefixLoadFunction extends CostFunction {
 
   /*
    * Each prefix is served by a subset of servers. The average size per server is the total size
-   * of all regions for the cell, divided by the size of that subset. The cost is a function of how
-   * far the actual amoung of a cell on a server is from the average - an ideal distribution
+   * of all regions for the prefix, divided by the size of that subset. The cost is a function of how
+   * far the actual amount of a prefix on a server is from the average - an ideal distribution
    * will have every server hosting a prefix have exactly the average size (i.e. a perfectly
    * uniform distribution). The DoubleCostArray summarizes the storefile sizes with a variant
    * of the root mean square deviation to represent this.
@@ -41,7 +41,7 @@ abstract class CostFromPrefixLoadFunction extends CostFunction {
     }
 
     for (short prefix = 0; prefix < HubSpotCellUtilities.MAX_CELL_COUNT; prefix++) {
-      updateStoreFilePerCellPrefixCosts(prefix);
+      updateStoreFilePerPrefixCosts(prefix);
     }
   }
 
@@ -51,11 +51,11 @@ abstract class CostFromPrefixLoadFunction extends CostFunction {
       HubSpotCellUtilities.MAX_CELL_COUNT);
 
     for (short prefix : prefixes) {
-      updateStoreFilePerCellPrefixCosts(prefix);
+      updateStoreFilePerPrefixCosts(prefix);
     }
   }
 
-  private void updateStoreFilePerCellPrefixCosts(short prefix) {
+  private void updateStoreFilePerPrefixCosts(short prefix) {
     Map<Integer, AtomicDouble> costsByServer = new HashMap<>();
 
     for (int regionIndex : regionsByPrefix.get(prefix)) {
