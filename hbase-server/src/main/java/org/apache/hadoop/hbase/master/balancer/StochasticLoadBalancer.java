@@ -281,6 +281,7 @@ public class StochasticLoadBalancer extends BaseLoadBalancer {
     addCostFunction(costFunctions, new WriteRequestCostFunction(conf));
     addCostFunction(costFunctions, new MemStoreSizeCostFunction(conf));
     addCostFunction(costFunctions, new StoreFileCostFunction(conf));
+    addCostFunction(costFunctions, new PrefixStoreFileSkewCostFunction(conf));
     return costFunctions;
   }
 
