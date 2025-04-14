@@ -735,7 +735,14 @@ class AsyncRequestFutureImpl<CResult> implements AsyncRequestFuture {
       canRetry = Retry.NO_NOT_RETRIABLE;
     }
 
-    if (canRetry != Retry.YES) {
+    // HubSpot addition: extra tracking of errors here may avoid context-less retry exhaustion
+    boolean isErrorSet = false;
+    if (throwable != null) {
+      setError(originalIndex, row, throwable, server);
+      isErrorSet = true;
+    }
+
+    if (!isErrorSet && canRetry != Retry.YES) {
       // Batch.Callback<Res> was not called on failure in 0.94. We keep this.
       setError(originalIndex, row, throwable, server);
     } else if (isActionComplete(originalIndex, row)) {
