@@ -36,6 +36,8 @@ import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
+import com.google.common.base.Supplier;
+import com.google.common.base.Suppliers;
 import org.apache.hadoop.hbase.DoNotRetryIOException;
 import org.apache.hadoop.hbase.HBaseServerException;
 import org.apache.hadoop.hbase.HConstants;
@@ -71,6 +73,10 @@ class AsyncRequestFutureImpl<CResult> implements AsyncRequestFuture {
   private static final Logger LOG = LoggerFactory.getLogger(AsyncRequestFutureImpl.class);
 
   private RetryingTimeTracker tracker;
+
+  // HubSpot addition: gate for experimental error handling
+  private boolean lastIsHubSpotErrorHandlingEnabledResult = false;
+  private final Supplier<Boolean> isHubSpotErrorHandlingEnabled;
 
   /**
    * Runnable (that can be submitted to thread pool) that waits for when it's time to issue replica
@@ -393,6 +399,23 @@ class AsyncRequestFutureImpl<CResult> implements AsyncRequestFuture {
     }
     this.callsInProgress =
       Collections.newSetFromMap(new ConcurrentHashMap<CancellableRegionServerCallable, Boolean>());
+
+    // HubSpot addition: gate for experimental error handling
+    this.isHubSpotErrorHandlingEnabled = Suppliers.memoizeWithExpiration(
+      () -> {
+        if (callsInProgress == null || callsInProgress.isEmpty()) {
+          return lastIsHubSpotErrorHandlingEnabledResult;
+        }
+
+        boolean isLastHubSpotErrorHandlingEnabled = callsInProgress.stream()
+          .anyMatch(call -> call.requestAttributes.containsKey("hubspot.error.handling.enabled"));
+        lastIsHubSpotErrorHandlingEnabledResult = isLastHubSpotErrorHandlingEnabled;
+        return isLastHubSpotErrorHandlingEnabled;
+      },
+      1,
+      TimeUnit.MINUTES
+    );
+
     this.asyncProcess = asyncProcess;
     this.errorsByServer = createServerErrorTracker();
     this.errors = new BatchErrors();
@@ -737,9 +760,11 @@ class AsyncRequestFutureImpl<CResult> implements AsyncRequestFuture {
 
     // HubSpot addition: extra tracking of errors here may avoid context-less retry exhaustion
     boolean isErrorSet = false;
-    if (throwable != null) {
-      setError(originalIndex, row, throwable, server);
-      isErrorSet = true;
+    if (isHubSpotErrorHandlingEnabled.get()) {
+      if (throwable != null) {
+        setError(originalIndex, row, throwable, server);
+        isErrorSet = true;
+      }
     }
 
     if (!isErrorSet && canRetry != Retry.YES) {
