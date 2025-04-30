@@ -20,6 +20,7 @@ package org.apache.hadoop.hbase.quotas;
 import java.io.IOException;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.ThreadLocalRandom;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.client.TableDescriptor;
 import org.apache.hadoop.hbase.ipc.RpcScheduler;
@@ -32,7 +33,6 @@ import org.apache.yetus.audience.InterfaceAudience;
 import org.apache.yetus.audience.InterfaceStability;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
 import org.apache.hadoop.hbase.shaded.protobuf.generated.ClientProtos;
 
 /**
@@ -184,6 +184,9 @@ public class RegionServerRpcQuotaManager implements RpcQuotaManager {
   @Override
   public OperationQuota checkBatchQuota(final Region region,
     final OperationQuota.OperationType type) throws IOException, RpcThrottlingException {
+    if (ThreadLocalRandom.current().nextDouble() < 0.3) {
+      throw new IOException("Quota check failed");
+    }
     switch (type) {
       case GET:
         return this.checkBatchQuota(region, 0, 1, false);
