@@ -132,7 +132,7 @@ public class VerifyReplication extends Configured implements Tool {
   public static class Verifier extends TableMapper<ImmutableBytesWritable, Put> {
 
     private ThreadPoolExecutor reCompareExecutor = null;
-    private final LinkedBlockingQueue<Future<?>> reCompareTasks = new LinkedBlockingQueue<>(1_000);
+    private LinkedBlockingQueue<Future<?>> reCompareTasks = null;
 
     public enum Counters {
       GOODROWS,
@@ -199,6 +199,7 @@ public class VerifyReplication extends Configured implements Tool {
       }
       int reCompareThreads = conf.getInt(NAME + ".recompareThreads", 0);
       reCompareExecutor = buildReCompareExecutor(reCompareThreads, context);
+      reCompareTasks = buildReCompareTasksQueue(reCompareThreads);
       TableName tableName = TableName.valueOf(conf.get(NAME + ".tableName"));
       sourceConnection = ConnectionFactory.createConnection(conf);
       sourceTable = sourceConnection.getTable(tableName);
@@ -323,6 +324,15 @@ public class VerifyReplication extends Configured implements Tool {
 
     private void addSubmittedTaskToQueue(Future<?> task, Context context, Result value,
       String method) {
+      if (reCompareTasks == null) {
+        try {
+          task.get();
+        } catch (Exception e) {
+          throw new RuntimeException(e);
+        }
+        return;
+      }
+
       while (true) {
         if (reCompareTasks.offer(task)) {
           break;
@@ -451,6 +461,10 @@ public class VerifyReplication extends Configured implements Tool {
           super.rejectedExecution(runnable, e);
         }
       };
+    }
+
+    private static LinkedBlockingQueue<Future<?>> buildReCompareTasksQueue(int maxThreads) {
+      return maxThreads <= 0 ? null : new LinkedBlockingQueue<>(maxThreads * 10);
     }
   }
 
