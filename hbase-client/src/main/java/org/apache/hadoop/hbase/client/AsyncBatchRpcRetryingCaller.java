@@ -24,7 +24,6 @@ import static org.apache.hadoop.hbase.client.ConnectionUtils.translateException;
 import static org.apache.hadoop.hbase.util.ConcurrentMapUtils.computeIfAbsent;
 import static org.apache.hadoop.hbase.util.FutureUtils.addListener;
 import static org.apache.hadoop.hbase.util.FutureUtils.unwrapCompletionException;
-
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -63,9 +62,7 @@ import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
 import org.apache.yetus.audience.InterfaceAudience;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
 import org.apache.hbase.thirdparty.io.netty.util.Timer;
-
 import org.apache.hadoop.hbase.shaded.protobuf.RequestConverter;
 import org.apache.hadoop.hbase.shaded.protobuf.ResponseConverter;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.ClientProtos;
@@ -319,6 +316,9 @@ class AsyncBatchRpcRetryingCaller<T> {
         failedActions.add(action);
       }
     } else {
+      LOG.debug("Successfully processed action {} for row {} in region {} in attempt {}",
+        action.getOriginalIndex(), Bytes.toStringBinary(action.getAction().getRow()),
+        regionReq.loc.getRegion().getRegionNameAsString(), tries);
       action2Future.get(action).complete((T) result);
     }
   }
