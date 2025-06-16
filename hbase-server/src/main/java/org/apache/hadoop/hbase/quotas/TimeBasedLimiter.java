@@ -55,19 +55,21 @@ public class TimeBasedLimiter implements QuotaLimiter {
     ) {
       long refillInterval = conf.getLong(FixedIntervalRateLimiter.RATE_LIMITER_REFILL_INTERVAL_MS,
         RateLimiter.DEFAULT_TIME_UNIT);
-      reqsLimiter = new FixedIntervalRateLimiter(refillInterval);
-      reqSizeLimiter = new FixedIntervalRateLimiter(refillInterval);
-      writeReqsLimiter = new FixedIntervalRateLimiter(refillInterval);
-      writeSizeLimiter = new FixedIntervalRateLimiter(refillInterval);
-      readReqsLimiter = new FixedIntervalRateLimiter(refillInterval);
-      readSizeLimiter = new FixedIntervalRateLimiter(refillInterval);
-      reqCapacityUnitLimiter = new FixedIntervalRateLimiter(refillInterval);
-      writeCapacityUnitLimiter = new FixedIntervalRateLimiter(refillInterval);
-      readCapacityUnitLimiter = new FixedIntervalRateLimiter(refillInterval);
-      atomicReqLimiter = new FixedIntervalRateLimiter(refillInterval);
-      atomicReadSizeLimiter = new FixedIntervalRateLimiter(refillInterval);
-      atomicWriteSizeLimiter = new FixedIntervalRateLimiter(refillInterval);
-      reqHandlerUsageTimeLimiter = new FixedIntervalRateLimiter(refillInterval);
+      // todo default to false?
+      boolean adaptiveWaitEnabled = conf.getBoolean(FixedIntervalRateLimiter.RATE_LIMITER_REFILL_INTERVAL_ADAPTIVE, true);
+      reqsLimiter = new FixedIntervalRateLimiter(refillInterval, adaptiveWaitEnabled);
+      reqSizeLimiter = new FixedIntervalRateLimiter(refillInterval, adaptiveWaitEnabled);
+      writeReqsLimiter = new FixedIntervalRateLimiter(refillInterval, adaptiveWaitEnabled);
+      writeSizeLimiter = new FixedIntervalRateLimiter(refillInterval, adaptiveWaitEnabled);
+      readReqsLimiter = new FixedIntervalRateLimiter(refillInterval, adaptiveWaitEnabled);
+      readSizeLimiter = new FixedIntervalRateLimiter(refillInterval, adaptiveWaitEnabled);
+      reqCapacityUnitLimiter = new FixedIntervalRateLimiter(refillInterval, adaptiveWaitEnabled);
+      writeCapacityUnitLimiter = new FixedIntervalRateLimiter(refillInterval, adaptiveWaitEnabled);
+      readCapacityUnitLimiter = new FixedIntervalRateLimiter(refillInterval, adaptiveWaitEnabled);
+      atomicReqLimiter = new FixedIntervalRateLimiter(refillInterval, adaptiveWaitEnabled);
+      atomicReadSizeLimiter = new FixedIntervalRateLimiter(refillInterval, adaptiveWaitEnabled);
+      atomicWriteSizeLimiter = new FixedIntervalRateLimiter(refillInterval, adaptiveWaitEnabled);
+      reqHandlerUsageTimeLimiter = new FixedIntervalRateLimiter(refillInterval, adaptiveWaitEnabled);
     } else {
       reqsLimiter = new AverageIntervalRateLimiter();
       reqSizeLimiter = new AverageIntervalRateLimiter();

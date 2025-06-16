@@ -23,6 +23,7 @@ import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertTrue;
 
 import java.util.concurrent.TimeUnit;
+import org.apache.hadoop.fs.viewfs.TestNNStartupWhenViewFSOverloadSchemeEnabled;
 import org.apache.hadoop.hbase.HBaseClassTestRule;
 import org.apache.hadoop.hbase.testclassification.RegionServerTests;
 import org.apache.hadoop.hbase.testclassification.SmallTests;
@@ -126,7 +127,7 @@ public class TestRateLimiter {
 
   @Test
   public void testOverconsumptionFixedIntervalRefillStrategy() throws InterruptedException {
-    RateLimiter limiter = new FixedIntervalRateLimiter();
+    RateLimiter limiter = new FixedIntervalRateLimiter(1000, true);
     limiter.set(10, TimeUnit.SECONDS);
 
     // fix the current time in order to get the precise value of interval
@@ -143,9 +144,12 @@ public class TestRateLimiter {
     // 10 resources are available, but we need to consume 20 resources
     limiter.consume(20);
     // We over-consumed by 10. Since this is a fixed interval refill, where
-    // each interval we refill the full limit amount, we need to wait 2 intervals -- first
-    // interval gets us from -10 to 0, second gets us from 0 to 10, though we just want the 1.
-    assertEquals(2000, limiter.waitInterval(1));
+    // each interval we refill the full limit amount, we need to wait 2 intervals:
+    // first interval gets us from -10 to 0, second gets us from 0 to 10 (so we have 1+ available).
+    // Base wait would be ~2000ms, but first violation gets 0.1x multiplier: 2000 * 0.1 = 200ms
+    long waitInterval = limiter.waitInterval(1);
+    assertTrue("Wait interval should be around 200ms (±50ms), but was: " + waitInterval, 
+               150 <= waitInterval && waitInterval <= 250);
     EnvironmentEdgeManager.reset();
 
     // Verify that after 1sec also no resource should be available
@@ -159,7 +163,7 @@ public class TestRateLimiter {
 
   @Test
   public void testFixedIntervalResourceAvailability() throws Exception {
-    RateLimiter limiter = new FixedIntervalRateLimiter();
+    RateLimiter limiter = new FixedIntervalRateLimiter(1000, false);
     limiter.set(10, TimeUnit.SECONDS);
 
     assertEquals(0, limiter.getWaitIntervalMs(10));
@@ -174,7 +178,7 @@ public class TestRateLimiter {
   @Test
   public void testLimiterBySmallerRate() throws InterruptedException {
     // set limiter is 10 resources per seconds
-    RateLimiter limiter = new FixedIntervalRateLimiter();
+    RateLimiter limiter = new FixedIntervalRateLimiter(1000, false);
     limiter.set(10, TimeUnit.SECONDS);
 
     int count = 0; // control the test count
@@ -216,7 +220,7 @@ public class TestRateLimiter {
 
   @Test
   public void testCanExecuteOfFixedIntervalRateLimiter() throws InterruptedException {
-    RateLimiter limiter = new FixedIntervalRateLimiter();
+    RateLimiter limiter = new FixedIntervalRateLimiter(1000, false);
     // when set limit is 100 per sec, this FixedIntervalRateLimiter will support at max 100 per sec
     limiter.set(100, TimeUnit.SECONDS);
     limiter.setNextRefillTime(EnvironmentEdgeManager.currentTime());
@@ -277,7 +281,7 @@ public class TestRateLimiter {
 
   @Test
   public void testRefillOfFixedIntervalRateLimiter() throws InterruptedException {
-    RateLimiter limiter = new FixedIntervalRateLimiter();
+    RateLimiter limiter = new FixedIntervalRateLimiter(1000, false);
     limiter.set(60, TimeUnit.SECONDS);
     assertEquals(60, limiter.getAvailable());
     // first refill, will return the number same with limit
@@ -313,7 +317,7 @@ public class TestRateLimiter {
 
     // For unconfigured limiters, it is supposed to use as much as possible
     RateLimiter avgLimiter = new AverageIntervalRateLimiter();
-    RateLimiter fixLimiter = new FixedIntervalRateLimiter();
+    RateLimiter fixLimiter = new FixedIntervalRateLimiter(1000, false);
 
     assertEquals(limit, avgLimiter.getAvailable());
     assertEquals(limit, fixLimiter.getAvailable());
@@ -353,7 +357,7 @@ public class TestRateLimiter {
 
     RateLimiter avgLimiter = new AverageIntervalRateLimiter();
     avgLimiter.set(limit, TimeUnit.SECONDS);
-    RateLimiter fixLimiter = new FixedIntervalRateLimiter();
+    RateLimiter fixLimiter = new FixedIntervalRateLimiter(1000, false);
     fixLimiter.set(limit, TimeUnit.SECONDS);
 
     assertEquals(limit, avgLimiter.getAvailable());
@@ -432,21 +436,20 @@ public class TestRateLimiter {
 
   @Test
   public void itRunsFullWithPartialRefillInterval() {
-    RateLimiter limiter = new FixedIntervalRateLimiter(100);
+    RateLimiter limiter = new FixedIntervalRateLimiter(100, true);
     limiter.set(10, TimeUnit.SECONDS);
     assertEquals(0, limiter.getWaitIntervalMs());
 
-    // Consume the quota
+    // Consume the quota  
     limiter.consume(10);
 
-    // Need to wait 1s to acquire another resource
+    // First violation: Need to wait ~0.1s due to 0.1x multiplier on first violation (base would be ~1s)
     long waitInterval = limiter.waitInterval(10);
-    assertTrue(900 < waitInterval);
-    assertTrue(1000 >= waitInterval);
-    // We need to wait 2s to acquire more than 10 resources
+    assertTrue("First violation wait should be 80-120ms", 80 < waitInterval && 120 >= waitInterval);
+    
+    // Second violation: Linear ramp gives ~0.2x multiplier for 2nd violation
     waitInterval = limiter.waitInterval(20);
-    assertTrue(1900 < waitInterval);
-    assertTrue(2000 >= waitInterval);
+    assertTrue("Second violation wait should be 360-440ms", 360 < waitInterval && 440 >= waitInterval);
 
     limiter.setNextRefillTime(limiter.getNextRefillTime() - 1000);
     // We've waited the full interval, so we should now have 10
@@ -456,25 +459,24 @@ public class TestRateLimiter {
 
   @Test
   public void itRunsPartialRefillIntervals() {
-    RateLimiter limiter = new FixedIntervalRateLimiter(100);
+    RateLimiter limiter = new FixedIntervalRateLimiter(100, true);
     limiter.set(10, TimeUnit.SECONDS);
     assertEquals(0, limiter.getWaitIntervalMs());
 
     // Consume the quota
     limiter.consume(10);
 
-    // Need to wait 1s to acquire another resource
+    // First violation: Need to wait ~0.1s due to 0.1x multiplier on first violation (base would be ~1s)
     long waitInterval = limiter.waitInterval(10);
-    assertTrue(900 < waitInterval);
-    assertTrue(1000 >= waitInterval);
-    // We need to wait 2s to acquire more than 10 resources
+    assertTrue("First violation wait should be 80-120ms", 80 < waitInterval && 120 >= waitInterval);
+    
+    // Second violation: Linear ramp gives ~0.2x multiplier for 2nd violation
     waitInterval = limiter.waitInterval(20);
-    assertTrue(1900 < waitInterval);
-    assertTrue(2000 >= waitInterval);
-    // We need to wait 0<=x<=100ms to acquire 1 resource
+    assertTrue("Second violation wait should be 360-440ms", 360 < waitInterval && 440 >= waitInterval);
+    
+    // Third violation: Linear ramp gives ~0.3x multiplier for 3rd violation, base ~100ms
     waitInterval = limiter.waitInterval(1);
-    assertTrue(0 < waitInterval);
-    assertTrue(100 >= waitInterval);
+    assertTrue("Third violation wait should be 25-35ms", 25 < waitInterval && 35 >= waitInterval);
 
     limiter.setNextRefillTime(limiter.getNextRefillTime() - 500);
     // We've waited half the interval, so we should now have half available
@@ -484,7 +486,7 @@ public class TestRateLimiter {
 
   @Test
   public void itRunsRepeatedPartialRefillIntervals() {
-    RateLimiter limiter = new FixedIntervalRateLimiter(100);
+    RateLimiter limiter = new FixedIntervalRateLimiter(100, true);
     limiter.set(10, TimeUnit.SECONDS);
     assertEquals(0, limiter.getWaitIntervalMs());
     // Consume the quota
@@ -495,5 +497,214 @@ public class TestRateLimiter {
       assertFalse(limiter.isAvailable(1)); // all resources consumed
       assertTrue(limiter.isAvailable(0)); // not negative
     }
+  }
+
+  @Test
+  public void testAdaptiveWaitIntervals() {
+    FixedIntervalRateLimiter limiter = new FixedIntervalRateLimiter(100, true);
+    limiter.set(10, TimeUnit.SECONDS);
+
+    // Fix current time to ensure predictable wait intervals
+    EnvironmentEdge edge = new EnvironmentEdge() {
+      private final long ts = EnvironmentEdgeManager.currentTime();
+
+      @Override
+      public long currentTime() {
+        return ts;
+      }
+    };
+    EnvironmentEdgeManager.injectEdge(edge);
+
+    // Initially should have 0 violations
+    assertEquals(0, limiter.getViolationsInCurrentInterval());
+
+    // Verify starting state is clear
+    assertEquals(0, limiter.getWaitIntervalMs());
+
+    // Over-consume to ensure we need to wait
+    limiter.consume(20);
+
+    // First violation: should get reduced wait time (0.5x multiplier)
+    long firstWaitInterval = limiter.waitInterval(1);
+    assertTrue(firstWaitInterval > 0);
+    assertEquals(1, limiter.getViolationsInCurrentInterval());
+
+    // Record the base wait for comparison
+    long baseWait = (long) Math.ceil(firstWaitInterval / 0.1); // Remove the 0.1 multiplier
+
+    // Second violation: linear ramp gives 0.2x multiplier
+    long secondWaitInterval = limiter.waitInterval(1);
+    assertEquals(2, limiter.getViolationsInCurrentInterval());
+    assertEquals((long) Math.ceil(baseWait * 0.2), secondWaitInterval);
+
+    // Third violation: linear ramp gives 0.3x multiplier
+    long thirdWaitInterval = limiter.waitInterval(1);
+    assertEquals(3, limiter.getViolationsInCurrentInterval());
+    assertEquals((long) Math.ceil(baseWait * 0.3), thirdWaitInterval);
+
+    // Refill should reset violations counter
+    limiter.setNextRefillTime(limiter.getNextRefillTime() - 1000);
+    long refillAmount = limiter.refill(limiter.getLimit());
+    assertTrue(refillAmount > 0);
+    assertEquals(0, limiter.getViolationsInCurrentInterval());
+
+    // Test with many violations to check the cap at 100x
+    limiter.consume(20); // Over-consume again
+    
+    // Generate enough violations to hit the 100x cap
+    // Exponential starts at violation 11: 1.1^(violations-10) = 100.0
+    // (violations-10) * log(1.1) = log(100.0)
+    // violations-10 = log(100.0)/log(1.1) ≈ 48.32, so ~49 violations after 10th
+    // Total violations needed ≈ 59
+    for (int i = 0; i < 59; i++) {
+      limiter.waitInterval(1);
+    }
+
+    // Capture the base wait from the 59th violation (should be at cap)
+    long cappedWaitInterval = limiter.waitInterval(1);
+    
+    // Generate one more violation - should still be at the same cap
+    long stillCappedWaitInterval = limiter.waitInterval(1);
+    
+    // Both should be equal since we've hit the cap
+    assertEquals("Wait intervals should be capped at same value", cappedWaitInterval, stillCappedWaitInterval);
+    assertTrue("Capped wait interval should be substantial", cappedWaitInterval > 1000);
+    
+    EnvironmentEdgeManager.reset();
+  }
+
+  @Test
+  public void testAdaptiveWaitIntervalReduction() {
+    FixedIntervalRateLimiter limiter = new FixedIntervalRateLimiter(100, true);
+    limiter.set(10, TimeUnit.SECONDS);
+
+    // Fix current time to ensure predictable wait intervals
+    EnvironmentEdge edge = new EnvironmentEdge() {
+      private final long ts = EnvironmentEdgeManager.currentTime();
+
+      @Override
+      public long currentTime() {
+        return ts;
+      }
+    };
+    EnvironmentEdgeManager.injectEdge(edge);
+
+    // Consume all resources and then request more than available
+    assertEquals(0, limiter.getWaitIntervalMs());
+    limiter.consume(20); // Over-consume by 10
+    
+    // This should require waiting for next refill interval plus additional time
+    long firstViolationWait = limiter.waitInterval(1);
+    assertTrue("First violation should have non-zero wait", firstViolationWait > 0);
+    assertEquals("Should have 1 violation", 1, limiter.getViolationsInCurrentInterval());
+
+    // Calculate what the base wait would be without the 0.1 multiplier  
+    long calculatedBaseWait = (long) Math.ceil(firstViolationWait / 0.1);
+    
+    // Verify second violation gets 0.2x wait time (linear ramp)
+    long secondViolationWait = limiter.waitInterval(1);
+    assertEquals("Second violation should get 0.2x wait time", (long) Math.ceil(calculatedBaseWait * 0.2), secondViolationWait);
+    assertEquals("Should have 2 violations", 2, limiter.getViolationsInCurrentInterval());
+    
+    EnvironmentEdgeManager.reset();
+  }
+
+  @Test
+  public void testViolationCounterResetsOnRefill() {
+    FixedIntervalRateLimiter limiter = new FixedIntervalRateLimiter(100, true);
+    limiter.set(10, TimeUnit.SECONDS);
+
+    // Fix current time to ensure predictable wait intervals
+    EnvironmentEdge edge = new EnvironmentEdge() {
+      private final long ts = EnvironmentEdgeManager.currentTime();
+
+      @Override
+      public long currentTime() {
+        return ts;
+      }
+    };
+    EnvironmentEdgeManager.injectEdge(edge);
+
+    // Initially should have 0 violations
+    assertEquals("Should start with 0 violations", 0, limiter.getViolationsInCurrentInterval());
+
+    // Verify starting state is clear
+    assertEquals(0, limiter.getWaitIntervalMs());
+    
+    // Over-consume to put limiter in negative state, ensuring we need to wait
+    limiter.consume(20); // Over-consume by 10
+    
+    // Now try to get resources - this should require waiting and generate violations
+    long wait1 = limiter.waitInterval(1); // First violation
+    assertTrue("First wait should be non-zero", wait1 > 0);
+    assertEquals("Should have 1 violation", 1, limiter.getViolationsInCurrentInterval());
+    
+    long wait2 = limiter.waitInterval(1); // Second violation
+    assertTrue("Second wait should be non-zero", wait2 > 0);
+    assertEquals("Should have 2 violations", 2, limiter.getViolationsInCurrentInterval());
+    
+    long wait3 = limiter.waitInterval(1); // Third violation
+    assertTrue("Third wait should be non-zero", wait3 > 0);
+    assertEquals("Should have 3 violations", 3, limiter.getViolationsInCurrentInterval());
+    
+    // Advance time to trigger refill
+    limiter.setNextRefillTime(limiter.getNextRefillTime() - 1000);
+    long refillAmount = limiter.refill(limiter.getLimit());
+    assertTrue("Should have refilled", refillAmount > 0);
+    
+    // Violations counter should be reset after refill
+    assertEquals("Violations should reset on refill", 0, limiter.getViolationsInCurrentInterval());
+    
+    // Over-consume again and create a new violation
+    limiter.consume(20); // Over-consume again
+    long waitInterval = limiter.waitInterval(1);
+    assertTrue("Should have non-zero wait", waitInterval > 0);
+    assertEquals("Should have 1 violation in new interval", 1, limiter.getViolationsInCurrentInterval());
+    
+    EnvironmentEdgeManager.reset();
+  }
+
+  @Test
+  public void testAdaptiveWaitIntervalsDisabled() {
+    FixedIntervalRateLimiter limiter = new FixedIntervalRateLimiter(100, false);
+    limiter.set(10, TimeUnit.SECONDS);
+
+    // Fix current time to ensure predictable wait intervals
+    EnvironmentEdge edge = new EnvironmentEdge() {
+      private final long ts = EnvironmentEdgeManager.currentTime();
+
+      @Override
+      public long currentTime() {
+        return ts;
+      }
+    };
+    EnvironmentEdgeManager.injectEdge(edge);
+
+    // Initially should have 0 violations
+    assertEquals(0, limiter.getViolationsInCurrentInterval());
+
+    // Verify starting state is clear
+    assertEquals(0, limiter.getWaitIntervalMs());
+
+    // Over-consume to ensure we need to wait
+    limiter.consume(20);
+
+    // With adaptive disabled, all wait intervals should be the same base wait time
+    long firstWaitInterval = limiter.waitInterval(1);
+    assertTrue(firstWaitInterval > 0);
+    
+    long secondWaitInterval = limiter.waitInterval(1);
+    long thirdWaitInterval = limiter.waitInterval(1);
+    
+    // All wait intervals should be identical when adaptive is disabled
+    assertEquals("All wait intervals should be the same when adaptive is disabled", 
+                 firstWaitInterval, secondWaitInterval);
+    assertEquals("All wait intervals should be the same when adaptive is disabled", 
+                 secondWaitInterval, thirdWaitInterval);
+    
+    // Violations counter should still increment even when adaptive is disabled
+    assertEquals(3, limiter.getViolationsInCurrentInterval());
+    
+    EnvironmentEdgeManager.reset();
   }
 }
