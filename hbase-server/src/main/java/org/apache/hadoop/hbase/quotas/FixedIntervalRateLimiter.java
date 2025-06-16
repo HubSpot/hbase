@@ -17,11 +17,31 @@
  */
 package org.apache.hadoop.hbase.quotas;
 
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.LongAdder;
 import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
 import org.apache.yetus.audience.InterfaceAudience;
 import org.apache.yetus.audience.InterfaceStability;
 
 import org.apache.hbase.thirdparty.com.google.common.base.Preconditions;
+
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 
 /**
  * With this limiter resources will be refilled only after a fixed interval of time.
@@ -33,7 +53,7 @@ public class FixedIntervalRateLimiter extends RateLimiter {
   /**
    * The FixedIntervalRateLimiter can be harsh from a latency/backoff perspective, which makes it
    * difficult to fully and consistently utilize a quota allowance. By configuring the
-   * {@link #RATE_LIMITER_REFILL_INTERVAL_MS} to a lower value you will encourage the rate limiter
+   * refill interval to a lower value you will encourage the rate limiter
    * to throw smaller wait intervals for requests which may be fulfilled in timeframes shorter than
    * the quota's full interval. For example, if you're saturating a 100MB/sec read IO quota with a
    * ton of tiny gets, then configuring this to a value like 100ms will ensure that your retry
@@ -43,34 +63,56 @@ public class FixedIntervalRateLimiter extends RateLimiter {
   public static final String RATE_LIMITER_REFILL_INTERVAL_MS =
     "hbase.quota.rate.limiter.refill.interval.ms";
 
-  private long nextRefillTime = -1L;
+  /**
+   * Controls whether adaptive wait intervals are enabled for the FixedIntervalRateLimiter.
+   * When enabled, the rate limiter will adjust wait times based on quota violation patterns
+   * to improve quota utilization and reduce unnecessary throttling.
+   */
+  public static final String RATE_LIMITER_REFILL_INTERVAL_ADAPTIVE =
+    "hbase.quota.rate.limiter.refill.interval.adaptive";
+
+  private final AtomicLong nextRefillTime = new AtomicLong(-1L);
   private final long refillInterval;
+  private final boolean adaptiveWaitEnabled;
+
+  private final LongAdder violationsInCurrentInterval = new LongAdder();
+  private volatile long lastRefillTime = -1L;
 
   public FixedIntervalRateLimiter() {
-    this(DEFAULT_TIME_UNIT);
+    this(DEFAULT_TIME_UNIT, false);
   }
 
-  public FixedIntervalRateLimiter(long refillInterval) {
+  public FixedIntervalRateLimiter(long refillInterval, boolean adaptiveWaitEnabled) {
     super();
     Preconditions.checkArgument(getTimeUnitInMillis() >= refillInterval,
       String.format("Refill interval %s must be less than or equal to TimeUnit millis %s",
         refillInterval, getTimeUnitInMillis()));
     this.refillInterval = refillInterval;
+    this.adaptiveWaitEnabled = adaptiveWaitEnabled;
   }
 
   @Override
   public long refill(long limit) {
     final long now = EnvironmentEdgeManager.currentTime();
-    if (nextRefillTime == -1) {
-      nextRefillTime = now + refillInterval;
+    long nextRefillAt = nextRefillTime.get();
+
+    if (nextRefillAt == -1L) {
+      nextRefillTime.compareAndSet(-1L, now + refillInterval);
       return limit;
     }
-    if (now < nextRefillTime) {
+    if (now < nextRefillAt) {
       return 0;
     }
-    long diff = refillInterval + now - nextRefillTime;
+
+    // Reset violations counter on new refill boundary
+    if (lastRefillTime != nextRefillAt) {
+      violationsInCurrentInterval.reset();
+      lastRefillTime = nextRefillAt;
+    }
+
+    long diff = refillInterval + now - nextRefillAt;
     long refills = diff / refillInterval;
-    nextRefillTime = now + refillInterval;
+    nextRefillTime.compareAndSet(nextRefillAt, now + refillInterval);
     long refillAmount = refills * getRefillIntervalAdjustedLimit(limit);
     return Math.min(limit, refillAmount);
   }
@@ -80,28 +122,64 @@ public class FixedIntervalRateLimiter extends RateLimiter {
     // adjust the limit based on the refill interval
     limit = getRefillIntervalAdjustedLimit(limit);
 
-    if (nextRefillTime == -1) {
+    long curr = nextRefillTime.get();
+    if (curr == -1L) {
       return 0;
     }
     final long now = EnvironmentEdgeManager.currentTime();
-    final long refillTime = nextRefillTime;
     long diff = amount - available;
-    // We will add limit at next interval. If diff is less than that limit, the wait interval
-    // is just time between now and then.
-    long nextRefillInterval = refillTime - now;
+    long nextRefillInterval = curr - now;
+
     if (diff <= limit) {
-      return nextRefillInterval;
+      if (nextRefillInterval > 0) {
+        return applyAdaptiveWait(nextRefillInterval);
+      }
+      // No wait needed
+      return 0;
     }
 
-    // Otherwise, we need to figure out how many refills are needed.
-    // There will be one at nextRefillInterval, and then some number of extra refills.
-    // Division will round down if not even, so we can just add that to our next interval
-    long extraRefillsNecessary = diff / limit;
-    // If it's even, subtract one since that will be covered by nextRefillInterval
+    // Otherwise, compute how many extra refill cycles are needed.
+    long extra = diff / limit;
     if (diff % limit == 0) {
-      extraRefillsNecessary--;
+      extra--;
     }
-    return nextRefillInterval + (extraRefillsNecessary * refillInterval);
+    long baseWait = nextRefillInterval + (extra * refillInterval);
+
+    if (baseWait > 0) {
+      return applyAdaptiveWait(baseWait);
+    }
+    return 0;
+  }
+
+  /**
+   * Applies the adaptive multiplier to the base wait interval.
+   * Uses violations in the current refill interval to derive a multiplier:
+   * - Few violations (0-1): multiplier < 1 (reduces wait times)
+   * - Many violations (2+): multiplier > 1 (increases wait times)
+   */
+  private long applyAdaptiveWait(long baseWait) {
+    violationsInCurrentInterval.increment();
+    
+    if (!adaptiveWaitEnabled) {
+      return baseWait;
+    }
+    
+    int violations = (int) violationsInCurrentInterval.sum();
+    double multiplier;
+    
+    if (violations == 1) {
+      // First violation in interval: reduce wait time to encourage utilization
+      multiplier = 0.5;
+    } else if (violations == 2) {
+      // Second violation: use base wait time
+      multiplier = 1.0;
+    } else {
+      // Multiple violations: increase wait time exponentially to prevent overload
+      // Each additional violation adds 50%, capped at 100x
+      multiplier = Math.min(1.0 + (violations - 2) * 0.5, 100.0);
+    }
+    
+    return (long) Math.ceil(baseWait * multiplier);
   }
 
   private long getRefillIntervalAdjustedLimit(long limit) {
@@ -111,11 +189,18 @@ public class FixedIntervalRateLimiter extends RateLimiter {
   // This method is for strictly testing purpose only
   @Override
   public void setNextRefillTime(long nextRefillTime) {
-    this.nextRefillTime = nextRefillTime;
+    this.nextRefillTime.set(nextRefillTime);
   }
 
   @Override
   public long getNextRefillTime() {
-    return this.nextRefillTime;
+    return nextRefillTime.get();
+  }
+
+  /**
+   * Get the current violations in the current interval count. Primarily for testing.
+   */
+  long getViolationsInCurrentInterval() {
+    return violationsInCurrentInterval.sum();
   }
 }
