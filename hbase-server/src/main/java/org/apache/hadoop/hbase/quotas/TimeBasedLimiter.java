@@ -48,26 +48,28 @@ public class TimeBasedLimiter implements QuotaLimiter {
   private RateLimiter reqHandlerUsageTimeLimiter = null;
 
   private TimeBasedLimiter() {
+    FeedbackAdaptiveRateLimiterFactory rateLimiterFactory = new FeedbackAdaptiveRateLimiterFactory(conf);
     if (
-      FixedIntervalRateLimiter.class.getName().equals(
+      /*FixedIntervalRateLimiter.class.getName().equals(
         conf.getClass(RateLimiter.QUOTA_RATE_LIMITER_CONF_KEY, AverageIntervalRateLimiter.class)
-          .getName())
+          .getName())*/
+      true
     ) {
       long refillInterval = conf.getLong(FixedIntervalRateLimiter.RATE_LIMITER_REFILL_INTERVAL_MS,
         RateLimiter.DEFAULT_TIME_UNIT);
-      reqsLimiter = new FixedIntervalRateLimiter(refillInterval);
-      reqSizeLimiter = new FixedIntervalRateLimiter(refillInterval);
-      writeReqsLimiter = new FixedIntervalRateLimiter(refillInterval);
-      writeSizeLimiter = new FixedIntervalRateLimiter(refillInterval);
-      readReqsLimiter = new FixedIntervalRateLimiter(refillInterval);
-      readSizeLimiter = new FixedIntervalRateLimiter(refillInterval);
-      reqCapacityUnitLimiter = new FixedIntervalRateLimiter(refillInterval);
-      writeCapacityUnitLimiter = new FixedIntervalRateLimiter(refillInterval);
-      readCapacityUnitLimiter = new FixedIntervalRateLimiter(refillInterval);
-      atomicReqLimiter = new FixedIntervalRateLimiter(refillInterval);
-      atomicReadSizeLimiter = new FixedIntervalRateLimiter(refillInterval);
-      atomicWriteSizeLimiter = new FixedIntervalRateLimiter(refillInterval);
-      reqHandlerUsageTimeLimiter = new FixedIntervalRateLimiter(refillInterval);
+      reqsLimiter = rateLimiterFactory.create();
+      reqSizeLimiter = rateLimiterFactory.create();
+      writeReqsLimiter = rateLimiterFactory.create();
+      writeSizeLimiter = rateLimiterFactory.create();
+      readReqsLimiter = rateLimiterFactory.create();
+      readSizeLimiter = rateLimiterFactory.create();
+      reqCapacityUnitLimiter = rateLimiterFactory.create();
+      writeCapacityUnitLimiter = rateLimiterFactory.create();
+      readCapacityUnitLimiter = rateLimiterFactory.create();
+      atomicReqLimiter = rateLimiterFactory.create();
+      atomicReadSizeLimiter = rateLimiterFactory.create();
+      atomicWriteSizeLimiter = rateLimiterFactory.create();
+      reqHandlerUsageTimeLimiter = rateLimiterFactory.create();
     } else {
       reqsLimiter = new AverageIntervalRateLimiter();
       reqSizeLimiter = new AverageIntervalRateLimiter();
