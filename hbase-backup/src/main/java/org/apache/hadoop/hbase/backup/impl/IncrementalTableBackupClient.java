@@ -434,6 +434,9 @@ public class IncrementalTableBackupClient extends TableBackupClient {
 
     boolean diskBasedSortingEnabledOriginalValue = HFileOutputFormat2.diskBasedSortingEnabled(conf);
     conf.setBoolean(HFileOutputFormat2.DISK_BASED_SORTING_ENABLED_KEY, true);
+
+    // Rack-aware WAL processing configuration is set directly via command line to the same key
+    // WALPlayer uses
     String[] playerArgs = { dirs, StringUtils.join(tableList, ",") };
 
     try {
