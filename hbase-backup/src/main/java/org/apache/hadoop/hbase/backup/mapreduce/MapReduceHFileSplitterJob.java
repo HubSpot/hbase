@@ -43,7 +43,6 @@ import org.apache.hadoop.hbase.mapreduce.TableMapReduceUtil;
 import org.apache.hadoop.hbase.snapshot.SnapshotRegionLocator;
 import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
 import org.apache.hadoop.hbase.util.MapReduceExtendedCell;
-import org.apache.hadoop.hbase.util.Pair;
 import org.apache.hadoop.io.NullWritable;
 import org.apache.hadoop.mapreduce.InputSplit;
 import org.apache.hadoop.mapreduce.Job;
@@ -110,10 +109,10 @@ public class MapReduceHFileSplitterJob extends Configured implements Tool {
     /**
      * Get preferred locations for a group of HFiles to optimize rack-aware processing.
      * 
-     * @param hfiles Collection of HFile paths and sizes that will be processed together
+     * @param hfiles Collection of HFile paths that will be processed together
      * @return Set of preferred host names for processing these HFiles
      */
-    Set<String> getLocationsForInputFiles(final Collection<Pair<String, Long>> hfiles);
+    Set<String> getLocationsForInputFiles(final Collection<String> hfiles);
   }
 
 
@@ -123,7 +122,7 @@ public class MapReduceHFileSplitterJob extends Configured implements Tool {
    */
   public static class NoopHFileLocationResolver implements HFileLocationResolver {
     @Override
-    public Set<String> getLocationsForInputFiles(Collection<Pair<String, Long>> hfiles) {
+    public Set<String> getLocationsForInputFiles(Collection<String> hfiles) {
       // No location hints - lets YARN scheduler decide
       return Collections.emptySet();
     }
@@ -154,9 +153,9 @@ public class MapReduceHFileSplitterJob extends Configured implements Tool {
       
       // 1. Get all HFiles from input paths
       List<FileStatus> files = listStatus(context);
-      Collection<Pair<String, Long>> hfiles = new ArrayList<>();
+      Collection<String> hfilePaths = new ArrayList<>();
       for (FileStatus file : files) {
-        hfiles.add(new Pair<>(file.getPath().toString(), file.getLen()));
+        hfilePaths.add(file.getPath().toString());
       }
       
       // 2. Load pluggable FileLocationResolver
@@ -170,9 +169,9 @@ public class MapReduceHFileSplitterJob extends Configured implements Tool {
       // 3. Create InputSplits directly - one per file
       List<InputSplit> splits = new ArrayList<>();
       
-      for (Pair<String, Long> hfile : hfiles) {
-        Path path = new Path(hfile.getFirst());
-        long length = hfile.getSecond();
+      for (FileStatus file : files) {
+        Path path = file.getPath();
+        long length = file.getLen();
         
         if (length <= 0) {
           LOG.warn("Skipping empty or invalid HFile: {} with length: {}", path, length);
@@ -181,14 +180,14 @@ public class MapReduceHFileSplitterJob extends Configured implements Tool {
         
         // Get location hints for this individual file
         Set<String> locations = fileLocationResolver.getLocationsForInputFiles(
-          Collections.singletonList(hfile));
+          Collections.singletonList(path.toString()));
         String[] locationArray = locations.toArray(new String[0]);
         
         splits.add(new FileSplit(path, 0, length, locationArray));
       }
       
       LOG.info("Created {} rack-aware InputSplits from {} HFiles", 
-        splits.size(), hfiles.size());
+        splits.size(), hfilePaths.size());
       
       return splits;
     }
@@ -273,8 +272,7 @@ public class MapReduceHFileSplitterJob extends Configured implements Tool {
     System.err.println("Other options:");
     System.err.println("   -D " + JOB_NAME_CONF_KEY
       + "=jobName - use the specified mapreduce job name for the HFile splitter");
-    
-    // NEW: Pluggable class options
+
     System.err.println("Rack-aware processing option:");
     System.err.println("  -D" + CONF_INPUT_FILE_LOCATION_RESOLVER_CLASS + "=<class> - " + 
       "HFile location resolver class for rack-aware processing");
