@@ -72,8 +72,7 @@ public class MapReduceHFileSplitterJob extends Configured implements Tool {
   public final static String TABLE_MAP_KEY = "hfile.input.tablesmap";
   private final static String JOB_NAME_CONF_KEY = "mapreduce.job.name";
   
-  // Configuration keys for pluggable rack-aware processing (must match BackupCommands)
-  public final static String CONF_INPUT_FILE_GROUPER_CLASS = "hfile.backup.input.file.grouper.class";
+  // Configuration key for pluggable rack-aware processing (must match BackupCommands)
   public final static String CONF_INPUT_FILE_LOCATION_RESOLVER_CLASS = "hfile.backup.input.file.location.resolver.class";
 
   public MapReduceHFileSplitterJob() {
@@ -101,22 +100,6 @@ public class MapReduceHFileSplitterJob extends Configured implements Tool {
     }
   }
 
-  /**
-   * Interface for custom file grouping logic to influence InputSplit creation for HFile processing.
-   * Similar to ExportSnapshot's CustomFileGrouper but for HFiles.
-   */
-  @InterfaceAudience.Public
-  public interface HFileCustomFileGrouper {
-    /**
-     * Groups HFiles into collections that should be processed together.
-     * Files in different groups are guaranteed not to be in the same InputSplit.
-     * 
-     * @param hfiles Collection of HFile paths and their sizes
-     * @return Collections of HFiles grouped by custom logic (e.g., rack, host, size)
-     */
-    Collection<Collection<Pair<String, Long>>> getGroupedInputFiles(
-      final Collection<Pair<String, Long>> hfiles);
-  }
 
   /**
    * Interface for resolving file locations to influence InputSplit placement for HFile processing.
@@ -133,18 +116,6 @@ public class MapReduceHFileSplitterJob extends Configured implements Tool {
     Set<String> getLocationsForInputFiles(final Collection<Pair<String, Long>> hfiles);
   }
 
-  /**
-   * Default no-op implementation of HFileCustomFileGrouper.
-   * Provides backward compatibility by putting all files in a single group.
-   */
-  public static class NoopHFileCustomFileGrouper implements HFileCustomFileGrouper {
-    @Override
-    public Collection<Collection<Pair<String, Long>>> getGroupedInputFiles(
-        Collection<Pair<String, Long>> hfiles) {
-      // Single group containing all files - maintains original behavior
-      return Collections.singletonList(new ArrayList<>(hfiles));
-    }
-  }
 
   /**
    * Default no-op implementation of HFileLocationResolver.
@@ -159,8 +130,8 @@ public class MapReduceHFileSplitterJob extends Configured implements Tool {
   }
 
   /**
-   * Rack-aware HFile input format that uses pluggable CustomFileGrouper and FileLocationResolver
-   * classes for optimal data locality. Follows the same pattern as ExportSnapshot.
+   * Rack-aware HFile input format that uses pluggable FileLocationResolver
+   * class for optimal data locality.
    */
   @InterfaceAudience.Private
   public static class RackAwareHFileInputFormat extends HFileInputFormat {
@@ -188,15 +159,7 @@ public class MapReduceHFileSplitterJob extends Configured implements Tool {
         hfiles.add(new Pair<>(file.getPath().toString(), file.getLen()));
       }
       
-      // 2. Load pluggable CustomFileGrouper
-      Class<? extends HFileCustomFileGrouper> grouperClass = conf.getClass(
-        CONF_INPUT_FILE_GROUPER_CLASS, 
-        NoopHFileCustomFileGrouper.class, 
-        HFileCustomFileGrouper.class);
-      HFileCustomFileGrouper customFileGrouper = 
-        ReflectionUtils.newInstance(grouperClass, conf);
-      
-      // 3. Load pluggable FileLocationResolver
+      // 2. Load pluggable FileLocationResolver
       Class<? extends HFileLocationResolver> resolverClass = conf.getClass(
         CONF_INPUT_FILE_LOCATION_RESOLVER_CLASS,
         NoopHFileLocationResolver.class,
@@ -204,47 +167,32 @@ public class MapReduceHFileSplitterJob extends Configured implements Tool {
       HFileLocationResolver fileLocationResolver = 
         ReflectionUtils.newInstance(resolverClass, conf);
       
-      // 4. Group files using custom grouper
-      Collection<Collection<Pair<String, Long>>> groupedFiles = 
-        customFileGrouper.getGroupedInputFiles(hfiles);
-      
-      // 5. Create InputSplits from grouped files
+      // 3. Create InputSplits directly - one per file
       List<InputSplit> splits = new ArrayList<>();
       
-      for (Collection<Pair<String, Long>> group : groupedFiles) {
-        // Get location hints for this group
-        Set<String> locations = fileLocationResolver.getLocationsForInputFiles(group);
+      for (Pair<String, Long> hfile : hfiles) {
+        Path path = new Path(hfile.getFirst());
+        long length = hfile.getSecond();
+        
+        if (length <= 0) {
+          LOG.warn("Skipping empty or invalid HFile: {} with length: {}", path, length);
+          continue;
+        }
+        
+        // Get location hints for this individual file
+        Set<String> locations = fileLocationResolver.getLocationsForInputFiles(
+          Collections.singletonList(hfile));
         String[] locationArray = locations.toArray(new String[0]);
         
-        // Create balanced splits from this group
-        List<InputSplit> groupSplits = createBalancedSplits(group, locationArray);
-        splits.addAll(groupSplits);
+        splits.add(new FileSplit(path, 0, length, locationArray));
       }
-
-      LOG.info("Created {} rack-aware InputSplits from {} HFiles in {} groups", 
-        splits.size(), hfiles.size(), groupedFiles.size());
+      
+      LOG.info("Created {} rack-aware InputSplits from {} HFiles", 
+        splits.size(), hfiles.size());
       
       return splits;
     }
     
-    private List<InputSplit> createBalancedSplits(Collection<Pair<String, Long>> hfiles, 
-        String[] locations) throws IOException {
-      List<InputSplit> splits = new ArrayList<>();
-      
-      // For now, create one split per HFile (can be enhanced for better balancing)
-      for (Pair<String, Long> hfile : hfiles) {
-        Path path = new Path(hfile.getFirst());
-        long length = hfile.getSecond();
-        if (length <= 0){
-          LOG.warn("Skipping empty or invalid Hfile: {} with length: {}", path, length);
-          continue;
-        }
-
-        splits.add(new FileSplit(path, 0, length, locations));
-      }
-      
-      return splits;
-    }
   }
 
   /**
@@ -303,11 +251,10 @@ public class MapReduceHFileSplitterJob extends Configured implements Tool {
 
   /**
    * Check if rack awareness is configured
-   * Both grouper and location resolver should be configured for effective rack awareness
+   * Location resolver should be configured for effective rack awareness
    */
   private boolean isRackAwarenessConfigured(Configuration conf) {
-    return conf.get(CONF_INPUT_FILE_GROUPER_CLASS) != null &&
-           conf.get(CONF_INPUT_FILE_LOCATION_RESOLVER_CLASS) != null;
+    return conf.get(CONF_INPUT_FILE_LOCATION_RESOLVER_CLASS) != null;
   }
 
   /**
@@ -328,12 +275,9 @@ public class MapReduceHFileSplitterJob extends Configured implements Tool {
       + "=jobName - use the specified mapreduce job name for the HFile splitter");
     
     // NEW: Pluggable class options
-    System.err.println("Rack-aware processing options (both required for full rack awareness):");
-    System.err.println("  -D" + CONF_INPUT_FILE_GROUPER_CLASS + "=<class> - " + 
-      "HFile custom grouper class for rack-aware processing");
+    System.err.println("Rack-aware processing option:");
     System.err.println("  -D" + CONF_INPUT_FILE_LOCATION_RESOLVER_CLASS + "=<class> - " + 
       "HFile location resolver class for rack-aware processing");
-    System.err.println("  Note: Both grouper and location resolver must be configured together");
     
     System.err.println("For performance also consider the following options:\n"
       + "  -Dmapreduce.map.speculative=false\n" + "  -Dmapreduce.reduce.speculative=false");
