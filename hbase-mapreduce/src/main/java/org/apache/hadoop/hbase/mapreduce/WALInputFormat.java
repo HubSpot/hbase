@@ -24,7 +24,6 @@ import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import org.apache.hadoop.conf.Configuration;
@@ -361,15 +360,11 @@ public class WALInputFormat extends InputFormat<WALKey, WALEdit> {
 
     List<InputSplit> splits = new ArrayList<>();
     for (FileStatus file : allFiles) {
-      // Convert to format compatible with location resolver
-      org.apache.hadoop.hbase.util.Pair<String, Long> walFile = 
-        new org.apache.hadoop.hbase.util.Pair<>(file.getPath().toString(), file.getLen());
-      
       // Get locations for this specific WAL file
       String[] locations = locationResolver.getLocationsForWALFiles(
-        Collections.singletonList(walFile)).toArray(new String[0]);
+        Collections.singletonList(file.getPath().toString())).toArray(new String[0]);
       
-      splits.add(new WALSplit(walFile.getFirst(), walFile.getSecond(), 
+      splits.add(new WALSplit(file.getPath().toString(), file.getLen(), 
                              startTime, endTime, locations));
     }
 

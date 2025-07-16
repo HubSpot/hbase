@@ -52,7 +52,6 @@ import org.apache.hadoop.hbase.snapshot.SnapshotRegionLocator;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
 import org.apache.hadoop.hbase.util.MapReduceExtendedCell;
-import org.apache.hadoop.hbase.util.Pair;
 import org.apache.hadoop.hbase.wal.WALEdit;
 import org.apache.hadoop.hbase.wal.WALKey;
 import org.apache.hadoop.mapreduce.Job;
@@ -98,12 +97,12 @@ public class WALPlayer extends Configured implements Tool {
    */
   @InterfaceAudience.Public
   public interface WALFileLocationResolver {
-    Set<String> getLocationsForWALFiles(final Collection<Pair<String, Long>> walFiles);
+    Set<String> getLocationsForWALFiles(final Collection<String> walFiles);
   }
 
   public static class NoopWALFileLocationResolver implements WALFileLocationResolver {
     @Override
-    public Set<String> getLocationsForWALFiles(Collection<Pair<String, Long>> walFiles) {
+    public Set<String> getLocationsForWALFiles(Collection<String> walFiles) {
       return ImmutableSet.of();
     }
   }
