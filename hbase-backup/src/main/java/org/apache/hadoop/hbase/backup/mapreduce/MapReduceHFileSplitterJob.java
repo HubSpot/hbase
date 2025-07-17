@@ -18,14 +18,8 @@
 package org.apache.hadoop.hbase.backup.mapreduce;
 
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.List;
-import java.util.Set;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.conf.Configured;
-import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.CellUtil;
@@ -44,14 +38,10 @@ import org.apache.hadoop.hbase.snapshot.SnapshotRegionLocator;
 import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
 import org.apache.hadoop.hbase.util.MapReduceExtendedCell;
 import org.apache.hadoop.io.NullWritable;
-import org.apache.hadoop.mapreduce.InputSplit;
 import org.apache.hadoop.mapreduce.Job;
-import org.apache.hadoop.mapreduce.JobContext;
 import org.apache.hadoop.mapreduce.Mapper;
 import org.apache.hadoop.mapreduce.lib.input.FileInputFormat;
-import org.apache.hadoop.mapreduce.lib.input.FileSplit;
 import org.apache.hadoop.mapreduce.lib.output.FileOutputFormat;
-import org.apache.hadoop.util.ReflectionUtils;
 import org.apache.hadoop.util.Tool;
 import org.apache.hadoop.util.ToolRunner;
 import org.apache.yetus.audience.InterfaceAudience;
@@ -70,9 +60,6 @@ public class MapReduceHFileSplitterJob extends Configured implements Tool {
   public final static String TABLES_KEY = "hfile.input.tables";
   public final static String TABLE_MAP_KEY = "hfile.input.tablesmap";
   private final static String JOB_NAME_CONF_KEY = "mapreduce.job.name";
-  
-  // Configuration key for pluggable rack-aware processing (must match BackupCommands)
-  public final static String CONF_INPUT_FILE_LOCATION_RESOLVER_CLASS = "hfile.backup.input.file.location.resolver.class";
 
   public MapReduceHFileSplitterJob() {
   }
@@ -99,101 +86,6 @@ public class MapReduceHFileSplitterJob extends Configured implements Tool {
     }
   }
 
-
-  /**
-   * Interface for resolving file locations to influence InputSplit placement for HFile processing.
-   * Similar to ExportSnapshot's FileLocationResolver but for HFiles.
-   */
-  @InterfaceAudience.Public
-  public interface HFileLocationResolver {
-    /**
-     * Get preferred locations for a group of HFiles to optimize rack-aware processing.
-     * 
-     * @param hfiles Collection of HFile paths that will be processed together
-     * @return Set of preferred host names for processing these HFiles
-     */
-    Set<String> getLocationsForInputFiles(final Collection<String> hfiles);
-  }
-
-
-  /**
-   * Default no-op implementation of HFileLocationResolver.
-   * Provides backward compatibility by returning no location hints.
-   */
-  public static class NoopHFileLocationResolver implements HFileLocationResolver {
-    @Override
-    public Set<String> getLocationsForInputFiles(Collection<String> hfiles) {
-      // No location hints - lets YARN scheduler decide
-      return Collections.emptySet();
-    }
-  }
-
-  /**
-   * Rack-aware HFile input format that uses pluggable FileLocationResolver
-   * class for optimal data locality.
-   */
-  @InterfaceAudience.Private
-  public static class RackAwareHFileInputFormat extends HFileInputFormat {
-    
-    private static final Logger LOG = LoggerFactory.getLogger(RackAwareHFileInputFormat.class);
-    
-    @Override
-    public List<InputSplit> getSplits(JobContext context) throws IOException {
-      try {
-        return createRackAwareSplits(context);
-      } catch (Exception e) {
-        LOG.error("Error creating rack-aware splits, falling back to standard splits", e);
-        return super.getSplits(context);
-      }
-    }
-    
-    private List<InputSplit> createRackAwareSplits(JobContext context) 
-        throws IOException {
-      Configuration conf = context.getConfiguration();
-      
-      // 1. Get all HFiles from input paths
-      List<FileStatus> files = listStatus(context);
-      Collection<String> hfilePaths = new ArrayList<>();
-      for (FileStatus file : files) {
-        hfilePaths.add(file.getPath().toString());
-      }
-      
-      // 2. Load pluggable FileLocationResolver
-      Class<? extends HFileLocationResolver> resolverClass = conf.getClass(
-        CONF_INPUT_FILE_LOCATION_RESOLVER_CLASS,
-        NoopHFileLocationResolver.class,
-        HFileLocationResolver.class);
-      HFileLocationResolver fileLocationResolver = 
-        ReflectionUtils.newInstance(resolverClass, conf);
-      
-      // 3. Create InputSplits directly - one per file
-      List<InputSplit> splits = new ArrayList<>();
-      
-      for (FileStatus file : files) {
-        Path path = file.getPath();
-        long length = file.getLen();
-        
-        if (length <= 0) {
-          LOG.warn("Skipping empty or invalid HFile: {} with length: {}", path, length);
-          continue;
-        }
-        
-        // Get location hints for this individual file
-        Set<String> locations = fileLocationResolver.getLocationsForInputFiles(
-          Collections.singletonList(path.toString()));
-        String[] locationArray = locations.toArray(new String[0]);
-        
-        splits.add(new FileSplit(path, 0, length, locationArray));
-      }
-      
-      LOG.info("Created {} rack-aware InputSplits from {} HFiles", 
-        splits.size(), hfilePaths.size());
-      
-      return splits;
-    }
-    
-  }
-
   /**
    * Sets up the actual job.
    * @param args The command line parameters.
@@ -213,16 +105,11 @@ public class MapReduceHFileSplitterJob extends Configured implements Tool {
     job.getConfiguration().setBoolean(HFileOutputFormat2.EXTENDED_CELL_SERIALIZATION_ENABLED_KEY,
       true);
     job.setJarByClass(MapReduceHFileSplitterJob.class);
-    
-    // BACKWARD COMPATIBLE: Choose InputFormat based on configuration
-    if (isRackAwarenessConfigured(conf)) {
-      LOG.info("Using RackAwareHFileInputFormat with pluggable classes");
-      job.setInputFormatClass(RackAwareHFileInputFormat.class);
-    } else {
-      LOG.info("Using standard HFileInputFormat");
-      job.setInputFormatClass(HFileInputFormat.class);
-    }
-    
+
+    // Use standard HFileInputFormat which now supports location resolver automatically
+    // HFileInputFormat will automatically detect and log rack-awareness configuration
+    job.setInputFormatClass(HFileInputFormat.class);
+
     job.setMapOutputKeyClass(ImmutableBytesWritable.class);
     String hfileOutPath = conf.get(BULK_OUTPUT_CONF_KEY);
     if (hfileOutPath != null) {
@@ -249,14 +136,6 @@ public class MapReduceHFileSplitterJob extends Configured implements Tool {
   }
 
   /**
-   * Check if rack awareness is configured
-   * Location resolver should be configured for effective rack awareness
-   */
-  private boolean isRackAwarenessConfigured(Configuration conf) {
-    return conf.get(CONF_INPUT_FILE_LOCATION_RESOLVER_CLASS) != null;
-  }
-
-  /**
    * Print usage
    * @param errorMsg Error message. Can be null.
    */
@@ -274,9 +153,9 @@ public class MapReduceHFileSplitterJob extends Configured implements Tool {
       + "=jobName - use the specified mapreduce job name for the HFile splitter");
 
     System.err.println("Rack-aware processing option:");
-    System.err.println("  -D" + CONF_INPUT_FILE_LOCATION_RESOLVER_CLASS + "=<class> - " + 
-      "HFile location resolver class for rack-aware processing");
-    
+    System.err.println("  -D" + HFileInputFormat.CONF_HFILE_LOCATION_RESOLVER_CLASS + "=<class> - "
+      + "HFile location resolver class for rack-aware processing");
+
     System.err.println("For performance also consider the following options:\n"
       + "  -Dmapreduce.map.speculative=false\n" + "  -Dmapreduce.reduce.speculative=false");
   }

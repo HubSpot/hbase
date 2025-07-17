@@ -63,6 +63,7 @@ import org.apache.hadoop.util.ToolRunner;
 import org.apache.yetus.audience.InterfaceAudience;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
 import org.apache.hbase.thirdparty.com.google.common.collect.ImmutableSet;
 
 /**
@@ -87,7 +88,8 @@ public class WALPlayer extends Configured implements Tool {
 
   private final static String JOB_NAME_CONF_KEY = "mapreduce.job.name";
 
-  // Configuration keys
+  // Configuration key for pluggable WAL location resolver class name
+  // Used to enable rack-aware processing by providing preferred data locality hints for WAL files
   public static final String CONF_WAL_FILE_LOCATION_RESOLVER_CLASS =
     "wal.backup.file.location.resolver.class";
 

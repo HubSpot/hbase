@@ -43,6 +43,7 @@ import static org.apache.hadoop.hbase.backup.BackupRestoreConstants.OPTION_WORKE
 import static org.apache.hadoop.hbase.backup.BackupRestoreConstants.OPTION_WORKERS_DESC;
 import static org.apache.hadoop.hbase.backup.BackupRestoreConstants.OPTION_YARN_QUEUE_NAME;
 import static org.apache.hadoop.hbase.backup.BackupRestoreConstants.OPTION_YARN_QUEUE_NAME_DESC;
+
 import java.io.IOException;
 import java.net.URI;
 import java.util.List;
@@ -67,6 +68,7 @@ import org.apache.hadoop.hbase.client.Connection;
 import org.apache.hadoop.hbase.client.ConnectionFactory;
 import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
 import org.apache.yetus.audience.InterfaceAudience;
+
 import org.apache.hbase.thirdparty.com.google.common.base.Splitter;
 import org.apache.hbase.thirdparty.com.google.common.collect.Lists;
 import org.apache.hbase.thirdparty.org.apache.commons.cli.CommandLine;
@@ -83,11 +85,13 @@ public final class BackupCommands {
   public final static String TOP_LEVEL_NOT_ALLOWED =
     "Top level (root) folder is not allowed to be a backup destination";
 
-  // Configuration key for WAL location resolver (must match WALPlayer.CONF_WAL_FILE_LOCATION_RESOLVER_CLASS)
-  private static final String CONF_WAL_FILE_LOCATION_RESOLVER_CLASS = "wal.backup.file.location.resolver.class";
-  
-  // Configuration key for HFile rack-aware processing (must match MapReduceHFileSplitterJob)
-  private static final String CONF_HFILE_LOCATION_RESOLVER_CLASS = "hfile.backup.input.file.location.resolver.class";
+  // Configuration keys for location resolvers
+  // Must match WALPlayer.CONF_WAL_FILE_LOCATION_RESOLVER_CLASS
+  private static final String CONF_WAL_FILE_LOCATION_RESOLVER_CLASS =
+    "wal.backup.file.location.resolver.class";
+  // Must match HFileInputFormat.CONF_HFILE_LOCATION_RESOLVER_CLASS
+  private static final String CONF_HFILE_LOCATION_RESOLVER_CLASS =
+    "hfile.backup.input.file.location.resolver.class";
 
   public static final String USAGE = "Usage: hbase backup COMMAND [command-specific arguments]\n"
     + "where COMMAND is one of:\n" + "  create     create a new backup image\n"
@@ -153,7 +157,6 @@ public final class BackupCommands {
         // Set MR job queuename to configuration
         getConf().set("mapreduce.job.queuename", queueName);
       }
-
 
       if (cmdline.hasOption(OPTION_WAL_LOCATION_RESOLVER)) {
         String resolverClass = cmdline.getOptionValue(OPTION_WAL_LOCATION_RESOLVER);
