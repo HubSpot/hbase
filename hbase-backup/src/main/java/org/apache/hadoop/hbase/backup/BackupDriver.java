@@ -22,6 +22,8 @@ import static org.apache.hadoop.hbase.backup.BackupRestoreConstants.OPTION_BANDW
 import static org.apache.hadoop.hbase.backup.BackupRestoreConstants.OPTION_BANDWIDTH_DESC;
 import static org.apache.hadoop.hbase.backup.BackupRestoreConstants.OPTION_DEBUG;
 import static org.apache.hadoop.hbase.backup.BackupRestoreConstants.OPTION_DEBUG_DESC;
+import static org.apache.hadoop.hbase.backup.BackupRestoreConstants.OPTION_HFILE_LOCATION_RESOLVER;
+import static org.apache.hadoop.hbase.backup.BackupRestoreConstants.OPTION_HFILE_LOCATION_RESOLVER_DESC;
 import static org.apache.hadoop.hbase.backup.BackupRestoreConstants.OPTION_IGNORECHECKSUM;
 import static org.apache.hadoop.hbase.backup.BackupRestoreConstants.OPTION_IGNORECHECKSUM_DESC;
 import static org.apache.hadoop.hbase.backup.BackupRestoreConstants.OPTION_KEEP;
@@ -37,8 +39,6 @@ import static org.apache.hadoop.hbase.backup.BackupRestoreConstants.OPTION_TABLE
 import static org.apache.hadoop.hbase.backup.BackupRestoreConstants.OPTION_TABLE_DESC;
 import static org.apache.hadoop.hbase.backup.BackupRestoreConstants.OPTION_WAL_LOCATION_RESOLVER;
 import static org.apache.hadoop.hbase.backup.BackupRestoreConstants.OPTION_WAL_LOCATION_RESOLVER_DESC;
-import static org.apache.hadoop.hbase.backup.BackupRestoreConstants.OPTION_HFILE_LOCATION_RESOLVER;
-import static org.apache.hadoop.hbase.backup.BackupRestoreConstants.OPTION_HFILE_LOCATION_RESOLVER_DESC;
 import static org.apache.hadoop.hbase.backup.BackupRestoreConstants.OPTION_WORKERS;
 import static org.apache.hadoop.hbase.backup.BackupRestoreConstants.OPTION_WORKERS_DESC;
 import static org.apache.hadoop.hbase.backup.BackupRestoreConstants.OPTION_YARN_QUEUE_NAME;

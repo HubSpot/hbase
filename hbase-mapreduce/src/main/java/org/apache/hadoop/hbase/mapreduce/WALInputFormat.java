@@ -361,16 +361,16 @@ public class WALInputFormat extends InputFormat<WALKey, WALEdit> {
     List<InputSplit> splits = new ArrayList<>();
     for (FileStatus file : allFiles) {
       // Get locations for this specific WAL file
-      String[] locations = locationResolver.getLocationsForWALFiles(
-        Collections.singletonList(file.getPath().toString())).toArray(new String[0]);
-      
-      splits.add(new WALSplit(file.getPath().toString(), file.getLen(), 
-                             startTime, endTime, locations));
+      String[] locations = locationResolver
+        .getLocationsForWALFiles(Collections.singletonList(file.getPath().toString()))
+        .toArray(new String[0]);
+
+      splits
+        .add(new WALSplit(file.getPath().toString(), file.getLen(), startTime, endTime, locations));
     }
 
     return splits;
   }
-
 
   private Path[] getInputPaths(Configuration conf) {
     String inpDirs = conf.get(FileInputFormat.INPUT_DIR);

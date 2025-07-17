@@ -27,7 +27,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-
 import org.apache.commons.io.FilenameUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.hadoop.fs.FileSystem;
@@ -51,7 +50,6 @@ import org.apache.hadoop.hbase.client.Connection;
 import org.apache.hadoop.hbase.io.hfile.HFile;
 import org.apache.hadoop.hbase.mapreduce.HFileOutputFormat2;
 import org.apache.hadoop.hbase.mapreduce.WALPlayer;
-import org.apache.hadoop.hbase.shaded.protobuf.generated.SnapshotProtos;
 import org.apache.hadoop.hbase.snapshot.SnapshotDescriptionUtils;
 import org.apache.hadoop.hbase.snapshot.SnapshotManifest;
 import org.apache.hadoop.hbase.snapshot.SnapshotRegionLocator;
@@ -59,10 +57,13 @@ import org.apache.hadoop.hbase.util.CommonFSUtils;
 import org.apache.hadoop.hbase.util.HFileArchiveUtil;
 import org.apache.hadoop.hbase.wal.AbstractFSWALProvider;
 import org.apache.hadoop.util.Tool;
-import org.apache.hbase.thirdparty.com.google.common.collect.Lists;
 import org.apache.yetus.audience.InterfaceAudience;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import org.apache.hbase.thirdparty.com.google.common.collect.Lists;
+
+import org.apache.hadoop.hbase.shaded.protobuf.generated.SnapshotProtos;
 
 /**
  * Incremental backup implementation. See the {@link #execute() execute} method.
@@ -411,7 +412,8 @@ public class IncrementalTableBackupClient extends TableBackupClient {
     conf.setBoolean(WALPlayer.MULTI_TABLES_SUPPORT, true);
     conf.set(JOB_NAME_CONF_KEY, jobname);
 
-    // Rack-aware WAL processing configuration is set directly via command line to the same key WALPlayer uses
+    // Rack-aware WAL processing configuration is set directly via command line to the same key
+    // WALPlayer uses
     String[] playerArgs = { dirs, StringUtils.join(tableList, ",") };
 
     try {
