@@ -91,7 +91,7 @@ public class BufferedMutatorImpl implements BufferedMutator {
   private final ExecutorService pool;
   private final AtomicInteger rpcTimeout;
   private final AtomicInteger operationTimeout;
-  private final Map<String, byte[]> requestAttributes;
+  private final RequestAttributesFactory requestAttributesFactory;
   private final boolean cleanupPoolOnClose;
   private volatile boolean closed = false;
   private final AsyncProcess ap;
@@ -143,7 +143,7 @@ public class BufferedMutatorImpl implements BufferedMutator {
       ? params.getOperationTimeout()
       : conn.getConnectionConfiguration().getOperationTimeout());
 
-    this.requestAttributes = params.getRequestAttributes();
+    this.requestAttributesFactory = params.getRequestAttributesFactory();
 
     this.ap = ap;
   }
@@ -263,7 +263,7 @@ public class BufferedMutatorImpl implements BufferedMutator {
   private AsyncProcessTask createTask(QueueRowAccess access) {
     return new AsyncProcessTask(AsyncProcessTask.newBuilder().setPool(pool).setTableName(tableName)
       .setRowAccess(access).setSubmittedRows(AsyncProcessTask.SubmittedRows.AT_LEAST_ONE)
-      .setRequestAttributes(requestAttributes).build()) {
+      .setRequestAttributes(requestAttributesFactory.create()).build()) {
       @Override
       public int getRpcTimeout() {
         return rpcTimeout.get();
@@ -407,7 +407,7 @@ public class BufferedMutatorImpl implements BufferedMutator {
 
   @Override
   public Map<String, byte[]> getRequestAttributes() {
-    return requestAttributes;
+    return requestAttributesFactory.create();
   }
 
   long getCurrentWriteBufferSize() {

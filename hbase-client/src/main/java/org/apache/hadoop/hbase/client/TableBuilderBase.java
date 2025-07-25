@@ -17,9 +17,6 @@
  */
 package org.apache.hadoop.hbase.client;
 
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.Map;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.yetus.audience.InterfaceAudience;
 
@@ -41,7 +38,9 @@ abstract class TableBuilderBase implements TableBuilder {
   protected final int scanReadRpcTimeout;
   protected int scanTimeout;
 
-  protected Map<String, byte[]> requestAttributes = Collections.emptyMap();
+  protected FixedRequestAttributesFactory.Builder fixedRequestAttributesFactoryBuilder = null;
+
+  protected RequestAttributesFactory requestAttributesFactory = null;
 
   TableBuilderBase(TableName tableName, ConnectionConfiguration connConf) {
     if (tableName == null) {
@@ -86,10 +85,31 @@ abstract class TableBuilderBase implements TableBuilder {
 
   @Override
   public TableBuilderBase setRequestAttribute(String key, byte[] value) {
-    if (this.requestAttributes.isEmpty()) {
-      this.requestAttributes = new HashMap<>();
+    if (fixedRequestAttributesFactoryBuilder == null) {
+      fixedRequestAttributesFactoryBuilder = FixedRequestAttributesFactory.newBuilder();
     }
-    this.requestAttributes.put(key, value);
+    fixedRequestAttributesFactoryBuilder.setAttribute(key, value);
     return this;
+  }
+
+  @Override
+  public TableBuilderBase
+    setRequestAttributesFactory(RequestAttributesFactory requestAttributesFactory) {
+    if (requestAttributesFactory == null) {
+      throw new IllegalArgumentException("requestAttributesFactory must not be null");
+    }
+    this.requestAttributesFactory = requestAttributesFactory;
+    return this;
+  }
+
+  RequestAttributesFactory getRequestAttributesFactory() {
+    if (requestAttributesFactory != null) {
+      return requestAttributesFactory;
+    } else if (fixedRequestAttributesFactoryBuilder != null) {
+      requestAttributesFactory = fixedRequestAttributesFactoryBuilder.build();
+      return requestAttributesFactory;
+    } else {
+      return FixedRequestAttributesFactory.EMPTY;
+    }
   }
 }

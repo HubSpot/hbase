@@ -120,7 +120,7 @@ class RawAsyncTableImpl implements AsyncTable<AdvancedScanResultConsumer> {
 
   private final int startLogErrorsCnt;
 
-  private final Map<String, byte[]> requestAttributes;
+  private final RequestAttributesFactory requestAttributesFactory;
 
   RawAsyncTableImpl(AsyncConnectionImpl conn, Timer retryTimer, AsyncTableBuilderBase<?> builder) {
     this.conn = conn;
@@ -148,7 +148,7 @@ class RawAsyncTableImpl implements AsyncTable<AdvancedScanResultConsumer> {
       ? conn.connConf.getMetaScannerCaching()
       : conn.connConf.getScannerCaching();
     this.defaultScannerMaxResultSize = conn.connConf.getScannerMaxResultSize();
-    this.requestAttributes = builder.requestAttributes;
+    this.requestAttributesFactory = builder.getRequestAttributesFactory();
   }
 
   @Override
@@ -253,8 +253,8 @@ class RawAsyncTableImpl implements AsyncTable<AdvancedScanResultConsumer> {
       .operationTimeout(operationTimeoutNs, TimeUnit.NANOSECONDS)
       .pause(pauseNs, TimeUnit.NANOSECONDS)
       .pauseForServerOverloaded(pauseNsForServerOverloaded, TimeUnit.NANOSECONDS)
-      .maxAttempts(maxAttempts).setRequestAttributes(requestAttributes)
-      .startLogErrorsCnt(startLogErrorsCnt).setRequestAttributes(requestAttributes);
+      .maxAttempts(maxAttempts).startLogErrorsCnt(startLogErrorsCnt)
+      .setRequestAttributes(getRequestAttributes());
   }
 
   private <T, R extends OperationWithAttributes & Row> SingleRequestCallerBuilder<T>
@@ -654,7 +654,7 @@ class RawAsyncTableImpl implements AsyncTable<AdvancedScanResultConsumer> {
   public void scan(Scan scan, AdvancedScanResultConsumer consumer) {
     new AsyncClientScanner(setDefaultScanConfig(scan), consumer, tableName, conn, retryTimer,
       pauseNs, pauseNsForServerOverloaded, maxAttempts, scanTimeoutNs, readRpcTimeoutNs,
-      startLogErrorsCnt, requestAttributes).start();
+      startLogErrorsCnt, getRequestAttributes()).start();
   }
 
   private long resultSize2CacheSize(long maxResultSize) {
@@ -751,7 +751,7 @@ class RawAsyncTableImpl implements AsyncTable<AdvancedScanResultConsumer> {
       .rpcTimeout(rpcTimeoutNs, TimeUnit.NANOSECONDS).pause(pauseNs, TimeUnit.NANOSECONDS)
       .pauseForServerOverloaded(pauseNsForServerOverloaded, TimeUnit.NANOSECONDS)
       .maxAttempts(maxAttempts).startLogErrorsCnt(startLogErrorsCnt)
-      .setRequestAttributes(requestAttributes).call();
+      .setRequestAttributes(getRequestAttributes()).call();
   }
 
   @Override
@@ -781,7 +781,10 @@ class RawAsyncTableImpl implements AsyncTable<AdvancedScanResultConsumer> {
 
   @Override
   public Map<String, byte[]> getRequestAttributes() {
-    return requestAttributes;
+    Map<String, byte[]> attributes = requestAttributesFactory.create();
+    Preconditions.checkState(attributes != null,
+      "RequestAttributesFactory.create() must not return null");
+    return attributes;
   }
 
   private <S, R> CompletableFuture<R> coprocessorService(Function<RpcChannel, S> stubMaker,

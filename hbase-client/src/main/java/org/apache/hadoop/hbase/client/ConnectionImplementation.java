@@ -495,7 +495,7 @@ public class ConnectionImplementation implements ClusterConnection, Closeable {
       @Override
       public Table build() {
         return new HTable(ConnectionImplementation.this, this, rpcCallerFactory,
-          rpcControllerFactory, pool, requestAttributes);
+          rpcControllerFactory, pool, getRequestAttributesFactory());
       }
     };
   }

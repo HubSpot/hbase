@@ -105,24 +105,34 @@ public interface AsyncBufferedMutatorBuilder {
   AsyncBufferedMutatorBuilder setMaxKeyValueSize(int maxKeyValueSize);
 
   /**
-   * Set a rpc request attribute.
-   * <p>
-   * Introduced in 2.6.1. Any custom implementations of this class should implement this method in
-   * order to take advantage of the new behavior.
-   * </p>
+   * Sets a request attribute. Ignored if a factory is set via
+   * {@link #setRequestAttributesFactory(RequestAttributesFactory)}.
+   * @deprecated Since 2.6.4, will be removed in 4.0.0. Please use
+   *             {@link #setRequestAttributesFactory(RequestAttributesFactory)} instead.
    */
+  @Deprecated
   default AsyncBufferedMutatorBuilder setRequestAttribute(String key, byte[] value) {
     throw new UnsupportedOperationException("Not implemented");
   }
 
   /**
-   * Set multiple rpc request attributes.
-   * <p>
-   * Introduced in 2.6.1. Any custom implementations of this class should implement this method in
-   * order to take advantage of the new behavior.
-   * </p>
+   * Sets multiple request attributes. Ignored if a factory is set via
+   * {@link #setRequestAttributesFactory(RequestAttributesFactory)}.
+   * @deprecated Since 2.6.4, will be removed in 4.0.0. Please use
+   *             {@link #setRequestAttributesFactory(RequestAttributesFactory)} instead.
    */
+  @Deprecated
   default AsyncBufferedMutatorBuilder setRequestAttributes(Map<String, byte[]> requestAttributes) {
+    throw new UnsupportedOperationException("Not implemented");
+  }
+
+  /**
+   * Sets the factory for creating request attributes. Use {@link FixedRequestAttributesFactory} for
+   * attributes that do not change, or implement {@link RequestAttributesFactory} for dynamic
+   * attributes.
+   */
+  default AsyncBufferedMutatorBuilder
+    setRequestAttributesFactory(RequestAttributesFactory requestAttributesFactory) {
     throw new UnsupportedOperationException("Not implemented");
   }
 
