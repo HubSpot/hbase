@@ -117,6 +117,7 @@ public class QuotaCache implements Stoppable {
     // holding the hbase:quota table with requests.
     int period = conf.getInt(REFRESH_CONF_KEY, REFRESH_DEFAULT_PERIOD);
     refreshChore = new QuotaRefresherChore(conf, period, this);
+    refreshChore.triggerNow();
     rsServices.getChoreService().scheduleChore(refreshChore);
   }
 
