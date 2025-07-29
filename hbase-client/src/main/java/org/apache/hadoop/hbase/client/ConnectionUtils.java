@@ -25,6 +25,7 @@ import static org.apache.hadoop.hbase.util.FutureUtils.addListener;
 import java.io.IOException;
 import java.lang.reflect.UndeclaredThrowableException;
 import java.net.UnknownHostException;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -34,6 +35,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
@@ -59,6 +61,7 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.hbase.thirdparty.com.google.common.base.Preconditions;
 import org.apache.hbase.thirdparty.com.google.protobuf.ServiceException;
+import org.apache.hbase.thirdparty.io.netty.util.Timeout;
 import org.apache.hbase.thirdparty.io.netty.util.Timer;
 
 import org.apache.hadoop.hbase.shaded.protobuf.ProtobufUtil;
@@ -419,21 +422,12 @@ public final class ConnectionUtils {
     scanMetrics.countOfRegions.incrementAndGet();
   }
 
-  /**
-   * Connect the two futures, if the src future is done, then mark the dst future as done. And if
-   * the dst future is done, then cancel the src future. This is used for timeline consistent read.
-   * <p/>
-   * Pass empty metrics if you want to link the primary future and the dst future so we will not
-   * increase the hedge read related metrics.
-   */
-  private static <T> void connect(CompletableFuture<T> srcFuture, CompletableFuture<T> dstFuture,
-    Optional<MetricsConnection> metrics) {
+  private static <T> void propagateSuccess(CompletableFuture<T> srcFuture,
+                                           CompletableFuture<T> dstFuture, Consumer<Void> onSuccess) {
     addListener(srcFuture, (r, e) -> {
-      if (e != null) {
-        dstFuture.completeExceptionally(e);
-      } else {
-        if (dstFuture.complete(r)) {
-          metrics.ifPresent(MetricsConnection::incrHedgedReadWin);
+      if (e == null) {
+        if (dstFuture.complete(r) && onSuccess != null) {
+          onSuccess.accept(null);
         }
       }
     });
@@ -445,19 +439,42 @@ public final class ConnectionUtils {
     addListener(dstFuture, (r, e) -> srcFuture.cancel(false));
   }
 
+  private static <T> void propagateException(CompletableFuture<T> srcFuture, CompletableFuture<T> dstFuture) {
+    addListener(srcFuture, (r, e) -> {
+      if (e != null) {
+        dstFuture.completeExceptionally(e);
+      }
+    });
+  }
+
   private static <T> void sendRequestsToSecondaryReplicas(
     Function<Integer, CompletableFuture<T>> requestReplica, RegionLocations locs,
-    CompletableFuture<T> future, Optional<MetricsConnection> metrics) {
+    CompletableFuture<T> future, CompletableFuture<T> primaryFuture,
+    Optional<MetricsConnection> metrics) {
     if (future.isDone()) {
       // do not send requests to secondary replicas if the future is done, i.e, the primary request
-      // has already been finished.
+      // has already finished successfully
       return;
     }
+
+    List<CompletableFuture<T>> allFutures = new ArrayList<>(locs.size());
+    allFutures.add(primaryFuture);
+    
     for (int replicaId = 1, n = locs.size(); replicaId < n; replicaId++) {
       CompletableFuture<T> secondaryFuture = requestReplica.apply(replicaId);
+      allFutures.add(secondaryFuture);
       metrics.ifPresent(MetricsConnection::incrHedgedReadOps);
-      connect(secondaryFuture, future, metrics);
+
+      propagateSuccess(secondaryFuture, future, (ignored) -> metrics.ifPresent(MetricsConnection::incrHedgedReadWin));
     }
+    
+    CompletableFuture.allOf(allFutures.toArray(new CompletableFuture[0]))
+      .whenComplete((ignored, throwable) -> {
+        // if all futures finished and future is still not complete, propagate the exception from the primary future
+        if (!future.isDone()) {
+          propagateException(primaryFuture, future);
+        }
+      });
   }
 
   static <T> CompletableFuture<T> timelineConsistentRead(AsyncRegionLocator locator,
@@ -472,9 +489,11 @@ public final class ConnectionUtils {
       return requestReplica.apply(query.getReplicaId());
     }
     // Timeline consistent read, where we may send requests to other region replicas
-    CompletableFuture<T> primaryFuture = requestReplica.apply(RegionReplicaUtil.DEFAULT_REPLICA_ID);
     CompletableFuture<T> future = new CompletableFuture<>();
-    connect(primaryFuture, future, Optional.empty());
+
+    CompletableFuture<T> primaryFuture = requestReplica.apply(RegionReplicaUtil.DEFAULT_REPLICA_ID);
+    propagateSuccess(primaryFuture, future, null);
+
     long startNs = System.nanoTime();
     // after the getRegionLocations, all the locations for the replicas of this region should have
     // been cached, so it is not big deal to locate them again when actually sending requests to
@@ -486,21 +505,32 @@ public final class ConnectionUtils {
             "Failed to locate all the replicas for table={}, row='{}', locateType={}"
               + " give up timeline consistent read",
             tableName, Bytes.toStringBinary(row), locateType, error);
+          propagateException(primaryFuture, future);
           return;
         }
         if (locs.size() <= 1) {
           LOG.warn(
             "There are no secondary replicas for region {}, give up timeline consistent read",
             locs.getDefaultRegionLocation().getRegion());
+          propagateException(primaryFuture, future);
           return;
         }
         long delayNs = primaryCallTimeoutNs - (System.nanoTime() - startNs);
-        if (delayNs <= 0) {
-          sendRequestsToSecondaryReplicas(requestReplica, locs, future, metrics);
+        if (delayNs <= 0 || primaryFuture.isCompletedExceptionally()) {
+          sendRequestsToSecondaryReplicas(requestReplica, locs, future, primaryFuture, metrics);
         } else {
-          retryTimer.newTimeout(
-            timeout -> sendRequestsToSecondaryReplicas(requestReplica, locs, future, metrics),
+          Timeout secondaryReadsTimeout = retryTimer.newTimeout(
+            timeout -> sendRequestsToSecondaryReplicas(requestReplica, locs, future, primaryFuture, metrics),
             delayNs, TimeUnit.NANOSECONDS);
+          
+          // if primary fails before the delay, trigger secondaries immediately
+          primaryFuture.whenComplete((value, throwable) -> {
+            if (throwable != null) {
+              if (secondaryReadsTimeout.cancel()) {
+                sendRequestsToSecondaryReplicas(requestReplica, locs, future, primaryFuture, metrics);
+              }
+            }
+          });
         }
       });
     return future;
