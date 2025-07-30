@@ -1,5 +1,6 @@
 buildpack:
   name: Blazar-Buildpack-Java-single-module
+  branch: rm-test-hbase
 
 env:
   PRE_RUN_BEFORE_STEPS: false

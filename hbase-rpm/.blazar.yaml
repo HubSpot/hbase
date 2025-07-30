@@ -1,5 +1,6 @@
 buildpack:
   name: Buildpack-RPMs
+  branch: rm-test-hbase
 
 env:
   PRE_RUN_BEFORE_STEPS: false
