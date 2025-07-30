@@ -2,6 +2,7 @@ buildpack:
   name: Buildpack-RPMs
 
 env:
+  PRE_RUN_BEFORE_STEPS: false
   RPM_BUILD_COMMAND: ./build.sh
    # Below variables are generated in prepare_environment.sh.
   # The build environment requires environment variables to be explicitly defined before they may
