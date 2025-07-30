@@ -17,11 +17,14 @@
  */
 package org.apache.hadoop.hbase.quotas;
 
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicLong;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
 import org.apache.yetus.audience.InterfaceAudience;
 import org.apache.yetus.audience.InterfaceStability;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import org.apache.hbase.thirdparty.com.google.common.base.Preconditions;
 import org.apache.hbase.thirdparty.com.google.common.util.concurrent.AtomicDouble;
@@ -36,6 +39,8 @@ import org.apache.hbase.thirdparty.com.google.common.util.concurrent.AtomicDoubl
 @InterfaceAudience.Private
 @InterfaceStability.Evolving
 public class FeedbackAdaptiveRateLimiter extends RateLimiter {
+
+  private static final Logger LOG = LoggerFactory.getLogger(FeedbackAdaptiveRateLimiter.class);
 
   /**
    * Amount to increase the backoff multiplier when contention is detected per refill interval.
@@ -86,6 +91,13 @@ public class FeedbackAdaptiveRateLimiter extends RateLimiter {
     "hbase.quota.rate.limiter.feedback.adaptive.utilization.error.budget";
   public static final double DEFAULT_UTILIZATION_ERROR_BUDGET = 0.025;
 
+  /**
+   * Maximum jitter percentage to apply to timing intervals to reduce synchronized bursts.
+   */
+  public static final String FEEDBACK_ADAPTIVE_JITTER_PERCENTAGE =
+    "hbase.quota.rate.limiter.feedback.adaptive.jitter.percentage";
+  public static final double DEFAULT_JITTER_PERCENTAGE = 0.1;
+
   private static final int WINDOW_TIME_MS = 60_000;
 
   public static class FeedbackAdaptiveRateLimiterFactory {
@@ -98,6 +110,7 @@ public class FeedbackAdaptiveRateLimiter extends RateLimiter {
     private final double oversubscriptionDecrement;
     private final double maxOversubscription;
     private final double utilizationErrorBudget;
+    private final double jitterPercentage;
 
     public FeedbackAdaptiveRateLimiterFactory(Configuration conf) {
       refillInterval = conf.getLong(FixedIntervalRateLimiter.RATE_LIMITER_REFILL_INTERVAL_MS,
@@ -120,12 +133,14 @@ public class FeedbackAdaptiveRateLimiter extends RateLimiter {
         conf.getDouble(FEEDBACK_ADAPTIVE_MAX_OVERSUBSCRIPTION, DEFAULT_MAX_OVERSUBSCRIPTION);
       utilizationErrorBudget = conf.getDouble(FEEDBACK_ADAPTIVE_UTILIZATION_ERROR_BUDGET,
         DEFAULT_UTILIZATION_ERROR_BUDGET);
+      jitterPercentage =
+        conf.getDouble(FEEDBACK_ADAPTIVE_JITTER_PERCENTAGE, DEFAULT_JITTER_PERCENTAGE);
     }
 
     public FeedbackAdaptiveRateLimiter create() {
       return new FeedbackAdaptiveRateLimiter(refillInterval, backoffMultiplierIncrement,
         backoffMultiplierDecrement, maxBackoffMultiplier, oversubscriptionIncrement,
-        oversubscriptionDecrement, maxOversubscription, utilizationErrorBudget);
+        oversubscriptionDecrement, maxOversubscription, utilizationErrorBudget, jitterPercentage);
     }
   }
 
@@ -139,6 +154,7 @@ public class FeedbackAdaptiveRateLimiter extends RateLimiter {
   private final double maxOversubscription;
   private final double minTargetUtilization;
   private final double maxTargetUtilization;
+  private final double jitterPercentage;
 
   // Adaptive backoff state
   private final AtomicDouble currentBackoffMultiplier = new AtomicDouble(1.0);
@@ -155,7 +171,7 @@ public class FeedbackAdaptiveRateLimiter extends RateLimiter {
   FeedbackAdaptiveRateLimiter(long refillInterval, double backoffMultiplierIncrement,
     double backoffMultiplierDecrement, double maxBackoffMultiplier,
     double oversubscriptionIncrement, double oversubscriptionDecrement, double maxOversubscription,
-    double utilizationErrorBudget) {
+    double utilizationErrorBudget, double jitterPercentage) {
     super();
     Preconditions.checkArgument(getTimeUnitInMillis() >= refillInterval, String.format(
       "Refill interval %s must be ≤ TimeUnit millis %s", refillInterval, getTimeUnitInMillis()));
@@ -169,6 +185,8 @@ public class FeedbackAdaptiveRateLimiter extends RateLimiter {
     Preconditions.checkArgument(utilizationErrorBudget > 0.0 && utilizationErrorBudget <= 1.0,
       String.format("Utilization error budget %s must be between 0.0 and 1.0",
         utilizationErrorBudget));
+    Preconditions.checkArgument(jitterPercentage >= 0.0 && jitterPercentage <= 1.0,
+      String.format("Jitter percentage %s must be between 0.0 and 1.0", jitterPercentage));
 
     this.refillInterval = refillInterval;
     this.backoffMultiplierIncrement = backoffMultiplierIncrement;
@@ -179,6 +197,7 @@ public class FeedbackAdaptiveRateLimiter extends RateLimiter {
     this.maxOversubscription = maxOversubscription;
     this.minTargetUtilization = 1.0 - utilizationErrorBudget;
     this.maxTargetUtilization = 1.0 + utilizationErrorBudget;
+    this.jitterPercentage = jitterPercentage;
 
     this.emaAlpha = refillInterval / (double) (WINDOW_TIME_MS + refillInterval);
     this.lastIntervalConsumed = new AtomicLong(0);
@@ -188,41 +207,69 @@ public class FeedbackAdaptiveRateLimiter extends RateLimiter {
   public long refill(long limit) {
     final long now = EnvironmentEdgeManager.currentTime();
     if (nextRefillTime == -1) {
-      nextRefillTime = now + refillInterval;
+      nextRefillTime = now + applyJitter(refillInterval);
       hadContentionThisInterval = false;
-      return getOversubscribedLimit(limit);
+      long oversubscribedLimit = getOversubscribedLimit(limit);
+      if (LOG.isDebugEnabled()) {
+        LOG.debug("Initial refill: limit={}, oversubscribedLimit={}, nextRefillTime={}", limit,
+          oversubscribedLimit, nextRefillTime);
+      }
+      return oversubscribedLimit;
     }
     if (now < nextRefillTime) {
       return 0;
     }
     long diff = refillInterval + now - nextRefillTime;
     long refills = diff / refillInterval;
-    nextRefillTime = now + refillInterval;
+    nextRefillTime = now + applyJitter(refillInterval);
 
     long intendedUsage = getRefillIntervalAdjustedLimit(limit);
+    double previousBackoffMultiplier = currentBackoffMultiplier.get();
+    double previousOversubscription = oversubscriptionProportion.get();
+
     if (intendedUsage > 0) {
       long consumed = lastIntervalConsumed.get();
       if (consumed > 0) {
         double util = (double) consumed / intendedUsage;
         utilizationEma = emaAlpha * util + (1.0 - emaAlpha) * utilizationEma;
+        if (LOG.isDebugEnabled()) {
+          LOG.debug("Utilization update: consumed={}, intendedUsage={}, util={}, utilizationEma={}",
+            consumed, intendedUsage, util, utilizationEma);
+        }
       }
     }
 
     if (hadContentionThisInterval) {
       currentBackoffMultiplier.set(Math
         .min(currentBackoffMultiplier.get() + backoffMultiplierIncrement, maxBackoffMultiplier));
+      if (LOG.isDebugEnabled()) {
+        LOG.debug("Contention detected: backoffMultiplier {} -> {}", previousBackoffMultiplier,
+          currentBackoffMultiplier.get());
+      }
     } else {
       currentBackoffMultiplier
         .set(Math.max(currentBackoffMultiplier.get() - backoffMultiplierDecrement, 1.0));
+      if (LOG.isDebugEnabled() && currentBackoffMultiplier.get() != previousBackoffMultiplier) {
+        LOG.debug("No contention: backoffMultiplier {} -> {}", previousBackoffMultiplier,
+          currentBackoffMultiplier.get());
+      }
     }
 
     double avgUtil = utilizationEma;
     if (avgUtil < minTargetUtilization) {
       oversubscriptionProportion.set(Math
         .min(oversubscriptionProportion.get() + oversubscriptionIncrement, maxOversubscription));
+      if (LOG.isDebugEnabled()) {
+        LOG.debug("Low utilization {}: oversubscription {} -> {}", avgUtil,
+          previousOversubscription, oversubscriptionProportion.get());
+      }
     } else if (avgUtil >= maxTargetUtilization) {
       oversubscriptionProportion
         .set(Math.max(oversubscriptionProportion.get() - oversubscriptionDecrement, 0.0));
+      if (LOG.isDebugEnabled()) {
+        LOG.debug("High utilization {}: oversubscription {} -> {}", avgUtil,
+          previousOversubscription, oversubscriptionProportion.get());
+      }
     }
 
     hadContentionThisInterval = false;
@@ -230,7 +277,17 @@ public class FeedbackAdaptiveRateLimiter extends RateLimiter {
 
     long refillAmount = refills * getRefillIntervalAdjustedLimit(limit);
     long maxRefill = getOversubscribedLimit(limit);
-    return Math.min(maxRefill, refillAmount);
+    long result = Math.min(maxRefill, refillAmount);
+
+    if (LOG.isDebugEnabled()) {
+      LOG.debug(
+        "Refill complete: refills={}, refillAmount={}, maxRefill={}, result={}, "
+          + "utilizationEma={}, backoffMultiplier={}, oversubscription={}",
+        refills, refillAmount, maxRefill, result, utilizationEma, currentBackoffMultiplier.get(),
+        oversubscriptionProportion.get());
+    }
+
+    return result;
   }
 
   private long getOversubscribedLimit(long limit) {
@@ -251,17 +308,36 @@ public class FeedbackAdaptiveRateLimiter extends RateLimiter {
     final long now = EnvironmentEdgeManager.currentTime();
     final long refillTime = nextRefillTime;
     long diff = amount - available;
-    if (diff > 0) hadContentionThisInterval = true;
-
-    long nextInterval = refillTime - now;
-    if (diff <= limit) {
-      return applyBackoffMultiplier(nextInterval);
+    boolean contentionDetected = diff > 0;
+    if (contentionDetected) {
+      hadContentionThisInterval = true;
+      if (LOG.isDebugEnabled()) {
+        LOG.debug(
+          "Contention detected in getWaitInterval: amount={}, available={}, diff={}, limit={}",
+          amount, available, diff, limit);
+      }
     }
 
-    long extra = diff / limit;
-    if (diff % limit == 0) extra--;
-    long baseWait = nextInterval + (extra * refillInterval);
-    return applyBackoffMultiplier(baseWait);
+    long nextInterval = refillTime - now;
+    long waitInterval;
+    if (diff <= limit) {
+      waitInterval = applyBackoffMultiplier(nextInterval);
+    } else {
+      long extra = diff / limit;
+      if (diff % limit == 0) extra--;
+      long baseWait = nextInterval + (extra * refillInterval);
+      waitInterval = applyBackoffMultiplier(baseWait);
+    }
+
+    if (LOG.isDebugEnabled()) {
+      LOG.debug(
+        "Wait interval calculated: amount={}, available={}, limit={}, nextInterval={}, "
+          + "waitInterval={}, backoffMultiplier={}, contention={}",
+        amount, available, limit, nextInterval, waitInterval, currentBackoffMultiplier.get(),
+        contentionDetected);
+    }
+
+    return waitInterval;
   }
 
   private long getRefillIntervalAdjustedLimit(long limit) {
@@ -269,7 +345,24 @@ public class FeedbackAdaptiveRateLimiter extends RateLimiter {
   }
 
   private long applyBackoffMultiplier(long baseWaitInterval) {
-    return (long) (baseWaitInterval * currentBackoffMultiplier.get());
+    return applyJitter((long) (baseWaitInterval * currentBackoffMultiplier.get()));
+  }
+
+  private long applyJitter(long interval) {
+    if (jitterPercentage <= 0.0) {
+      return interval;
+    }
+
+    double jitterRange = interval * jitterPercentage;
+    double randomJitter = ThreadLocalRandom.current().nextDouble(0.0, jitterRange);
+    long jitteredInterval = interval + (long) randomJitter;
+
+    if (LOG.isDebugEnabled() && randomJitter > 0) {
+      LOG.debug("Applied positive jitter: original={}, jitter={}, result={}", interval,
+        (long) randomJitter, jitteredInterval);
+    }
+
+    return jitteredInterval;
   }
 
   // strictly for testing
