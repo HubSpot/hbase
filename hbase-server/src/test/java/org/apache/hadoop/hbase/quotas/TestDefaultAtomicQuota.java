@@ -75,16 +75,11 @@ public class TestDefaultAtomicQuota {
     TEST_UTIL.waitTableAvailable(QuotaTableUtil.QUOTA_TABLE_NAME);
     TEST_UTIL.createTable(TABLE_NAME, FAMILY);
     TEST_UTIL.waitTableAvailable(TABLE_NAME);
-    QuotaCache.TEST_FORCE_REFRESH = true;
     TEST_UTIL.flush(TABLE_NAME);
   }
 
   @Test
   public void testDefaultAtomicReadLimits() throws Exception {
-    // No write throttling
-    configureLenientThrottle(ThrottleType.ATOMIC_WRITE_SIZE);
-    refreshQuotas();
-
     // Should have a strict throttle by default
     TEST_UTIL.waitFor(60_000, () -> runIncTest(100) < 100);
 
@@ -102,11 +97,6 @@ public class TestDefaultAtomicQuota {
 
   @Test
   public void testDefaultAtomicWriteLimits() throws Exception {
-    // No read throttling
-    configureLenientThrottle(ThrottleType.ATOMIC_REQUEST_NUMBER);
-    configureLenientThrottle(ThrottleType.ATOMIC_READ_SIZE);
-    refreshQuotas();
-
     // Should have a strict throttle by default
     TEST_UTIL.waitFor(60_000, () -> runIncTest(100) < 100);
 
