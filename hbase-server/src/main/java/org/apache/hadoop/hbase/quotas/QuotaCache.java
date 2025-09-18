@@ -307,6 +307,7 @@ public class QuotaCache implements Stoppable {
     @Override
     protected void chore() {
       synchronized (this) {
+        LOG.info("Reloading quota cache from hbase:quota table");
         updateQuotaFactors();
 
         try {
