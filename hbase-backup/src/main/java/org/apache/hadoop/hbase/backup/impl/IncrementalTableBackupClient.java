@@ -18,7 +18,6 @@
 package org.apache.hadoop.hbase.backup.impl;
 
 import static org.apache.hadoop.hbase.backup.BackupRestoreConstants.JOB_NAME_CONF_KEY;
-
 import java.io.IOException;
 import java.net.URI;
 import java.net.URISyntaxException;
@@ -60,9 +59,7 @@ import org.apache.hadoop.util.Tool;
 import org.apache.yetus.audience.InterfaceAudience;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
 import org.apache.hbase.thirdparty.com.google.common.collect.Lists;
-
 import org.apache.hadoop.hbase.shaded.protobuf.generated.SnapshotProtos;
 
 /**
@@ -249,9 +246,15 @@ public class IncrementalTableBackupClient extends TableBackupClient {
       }
     }
 
-    if (newlyArchived.size() > 0) {
+    if (!newlyArchived.isEmpty()) {
+      String rootDir = CommonFSUtils.getRootDir(conf).toString();
+
       activeFiles.removeAll(newlyArchived);
-      archiveFiles.addAll(newlyArchived);
+      for (String file : newlyArchived) {
+        String archivedFile = file.substring(rootDir.length() + 1);
+        archivedFile = new Path(HFileArchiveUtil.getArchivePath(conf), archivedFile).toString();
+        archiveFiles.add(archivedFile);
+      }
     }
 
     LOG.debug(newlyArchived.size() + " files have been archived.");
