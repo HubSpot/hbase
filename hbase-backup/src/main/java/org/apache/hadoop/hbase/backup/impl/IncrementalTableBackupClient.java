@@ -18,7 +18,6 @@
 package org.apache.hadoop.hbase.backup.impl;
 
 import static org.apache.hadoop.hbase.backup.BackupRestoreConstants.JOB_NAME_CONF_KEY;
-
 import java.io.IOException;
 import java.net.URI;
 import java.net.URISyntaxException;
@@ -60,9 +59,7 @@ import org.apache.hadoop.util.Tool;
 import org.apache.yetus.audience.InterfaceAudience;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
 import org.apache.hbase.thirdparty.com.google.common.collect.Lists;
-
 import org.apache.hadoop.hbase.shaded.protobuf.generated.SnapshotProtos;
 
 /**
@@ -197,6 +194,9 @@ public class IncrementalTableBackupClient extends TableBackupClient {
         int numActiveFiles = activeFiles.size();
         updateFileLists(activeFiles, archiveFiles);
         if (activeFiles.size() < numActiveFiles) {
+          // We've archived some files, delete bulkloads directory
+          // and re-try
+          deleteBulkLoadDirectory();
           continue;
         }
 
