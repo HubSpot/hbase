@@ -115,6 +115,10 @@ class FastFailInterceptorContext extends RetryingCallerInterceptorContext {
     guaranteedClientSideOnly.setValue(false);
     retryDespiteFastFailMode = false;
     tries = 0;
+    operationStartTime = -1;
+    rpcStartTime = -1;
+    attemptNumber = 0;
+    batchFailures = null;
   }
 
   @Override

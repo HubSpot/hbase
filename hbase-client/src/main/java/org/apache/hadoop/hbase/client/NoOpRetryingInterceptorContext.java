@@ -24,7 +24,10 @@ class NoOpRetryingInterceptorContext extends RetryingCallerInterceptorContext {
 
   @Override
   public void clear() {
-    // Do Nothing
+    operationStartTime = -1;
+    rpcStartTime = -1;
+    attemptNumber = 0;
+    batchFailures = null;
   }
 
   @Override

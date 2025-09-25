@@ -17,6 +17,7 @@
  */
 package org.apache.hadoop.hbase.client;
 
+import java.util.List;
 import org.apache.yetus.audience.InterfaceAudience;
 
 /**
@@ -28,6 +29,12 @@ import org.apache.yetus.audience.InterfaceAudience;
  */
 @InterfaceAudience.Private
 abstract class RetryingCallerInterceptorContext {
+
+  protected long operationStartTime = -1;
+  protected long rpcStartTime = -1;
+  protected int attemptNumber = 0;
+  protected List<Throwable> batchFailures = null;
+
   protected RetryingCallerInterceptorContext() {
   }
 
@@ -52,4 +59,61 @@ abstract class RetryingCallerInterceptorContext {
    * @return A new context object that can be used for use in the current retrying call
    */
   public abstract RetryingCallerInterceptorContext prepare(RetryingCallable<?> callable, int tries);
+
+  /**
+   * Returns the time when the operation (combo of all RPCs in a given get, put, multiget) started,
+   * in milliseconds since epoch
+   */
+  public long getOperationStartTime() {
+    return operationStartTime;
+  }
+
+  /**
+   * Set the time when the operation started
+   * @param operationStartTime the operation start time in milliseconds since epoch
+   */
+  public void setOperationStartTime(long operationStartTime) {
+    this.operationStartTime = operationStartTime;
+  }
+
+  /** Returns the time when the current RPC started, in milliseconds since epoch */
+  public long getRpcStartTime() {
+    return rpcStartTime;
+  }
+
+  /**
+   * Set the time when the current RPC started
+   * @param rpcStartTime the RPC start time in milliseconds since epoch
+   */
+  public void setRpcStartTime(long rpcStartTime) {
+    this.rpcStartTime = rpcStartTime;
+  }
+
+  /** Returns the attempt number for the current RPC in the operation (0-based) */
+  public int getAttemptNumber() {
+    return attemptNumber;
+  }
+
+  /**
+   * Set the attempt number for the current RPC
+   * @param attemptNumber the attempt number (0-based)
+   */
+  public void setAttemptNumber(int attemptNumber) {
+    this.attemptNumber = attemptNumber;
+  }
+
+  /**
+   * Returns the list of individual failures for batch operations, or null if not a batch operation
+   */
+  public List<Throwable> getBatchFailures() {
+    return batchFailures;
+  }
+
+  /**
+   * Set the batch failures for batch operations
+   * @param batchFailures the list of individual failures
+   */
+  public void setBatchFailures(List<Throwable> batchFailures) {
+    this.batchFailures = batchFailures;
+  }
 }

@@ -30,6 +30,9 @@ import org.apache.yetus.audience.InterfaceAudience;
  * catch (Exception e) { interceptor.handleFailure } finally { interceptor.updateFaulireInfo } The
  * {@link RetryingCallerInterceptor} also acts as a factory for getting a new
  * {@link RetryingCallerInterceptorContext}.
+ * <p>
+ * Note: Despite the name, {@code RetryingCallerInterceptor} is invoked for both retrying and
+ * no-retry call paths; it intercepts call attempts, not only retries.
  */
 
 @InterfaceAudience.Private

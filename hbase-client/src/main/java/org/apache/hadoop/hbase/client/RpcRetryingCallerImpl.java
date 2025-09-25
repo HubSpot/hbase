@@ -94,11 +94,19 @@ public class RpcRetryingCallerImpl<T> implements RpcRetryingCaller<T> {
     List<RetriesExhaustedException.ThrowableWithExtraContext> exceptions = new ArrayList<>();
     tracker.start();
     context.clear();
+    // Set operation start time once for the entire retry operation
+    context.setOperationStartTime(tracker.getStartTime());
+
     for (int tries = 0;; tries++) {
       long expectedSleep;
       try {
         // bad cache entries are cleared in the call to RetryingCallable#throwable() in catch block
         callable.prepare(tries != 0);
+
+        // Set RPC start time and attempt number for each individual attempt
+        context.setRpcStartTime(EnvironmentEdgeManager.currentTime());
+        context.setAttemptNumber(tries);
+
         interceptor.intercept(context.prepare(callable, tries));
         return callable.call(getTimeout(callTimeout));
       } catch (PreemptiveFastFailException e) {
@@ -185,18 +193,50 @@ public class RpcRetryingCallerImpl<T> implements RpcRetryingCaller<T> {
   @Override
   public T callWithoutRetries(RetryingCallable<T> callable, int callTimeout)
     throws IOException, RuntimeException {
-    // The code of this method should be shared with withRetries.
+    final RetryingCallerInterceptorContext context = interceptor.createEmptyContext();
+    final long operationStartTime = EnvironmentEdgeManager.currentTime();
+    boolean failed = false;
     try {
       callable.prepare(false);
+
+      // Set timing and attempt info
+      context.setOperationStartTime(operationStartTime);
+      context.setRpcStartTime(EnvironmentEdgeManager.currentTime());
+      context.setAttemptNumber(0);
+
+      interceptor.intercept(context.prepare(callable, 0));
       return callable.call(callTimeout);
+
+    } catch (PreemptiveFastFailException e) {
+      // preserve existing fast-fail behavior
+      throw e;
     } catch (Throwable t) {
-      Throwable t2 = translateException(t);
-      ExceptionUtil.rethrowIfInterrupt(t2);
-      // It would be nice to clear the location cache here.
-      if (t2 instanceof IOException) {
-        throw (IOException) t2;
-      } else {
-        throw new RuntimeException(t2);
+      ExceptionUtil.rethrowIfInterrupt(t);
+      failed = true;
+
+      // Interceptor should operate on translated exception
+      final Throwable cause = translateException(t);
+
+      // Batch failure enrichment for batch-aware metrics
+      if (cause instanceof RetriesExhaustedWithDetailsException) {
+        RetriesExhaustedWithDetailsException rewde = (RetriesExhaustedWithDetailsException) cause;
+        context.setBatchFailures(rewde.getCauses());
+      }
+
+      try {
+        interceptor.handleFailure(context, cause);
+      } catch (PreemptiveFastFailException e) {
+        // preserve existing fast-fail behavior
+        throw e;
+      }
+
+      if (cause instanceof IOException) throw (IOException) cause;
+      throw new RuntimeException(cause);
+
+    } finally {
+      // Update failure info only when we actually failed (mirrors typical usage)
+      if (failed) {
+        interceptor.updateFailureInfo(context);
       }
     }
   }

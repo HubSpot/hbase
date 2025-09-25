@@ -1501,6 +1501,16 @@ public final class HConstants {
     "hbase.client.fast.fail.interceptor.impl";
 
   /**
+   * Configuration key for specifying a custom RetryingCallerInterceptor implementation. When set,
+   * this interceptor will be used instead of the fast-fail interceptor for all client operations
+   * including both retrying and no-retry calls.
+   * @deprecated This was built on the interceptor framework, which has been deprecated since 2.3.0.
+   *             You should anticipate that this may be ineffective in 3.0.0 and removed in 4.0.0.
+   */
+  public static final String HBASE_CLIENT_RETRYING_CALLER_INTERCEPTOR_IMPL =
+    "hbase.client.retrying.caller.interceptor.impl";
+
+  /**
    * @deprecated since 2.4.0 and in 3.0.0, to be removed in 4.0.0, replaced by procedure-based
    *             distributed WAL splitter; see SplitWALManager.
    */

@@ -46,28 +46,51 @@ class RetryingCallerInterceptorFactory {
 
   /**
    * This builds the implementation of {@link RetryingCallerInterceptor} that we specify in the conf
-   * and returns the same. To use {@link PreemptiveFastFailInterceptor}, set
-   * HBASE_CLIENT_ENABLE_FAST_FAIL_MODE to true. HBASE_CLIENT_FAST_FAIL_INTERCEPTOR_IMPL is
-   * defaulted to {@link PreemptiveFastFailInterceptor}
+   * and returns the same. Configuration priority: 1. HBASE_CLIENT_RETRYING_CALLER_INTERCEPTOR_IMPL
+   * - custom interceptor (highest priority) 2. HBASE_CLIENT_ENABLE_FAST_FAIL_MODE - fast-fail
+   * interceptor (if enabled) 3. No-op interceptor (default)
    * @return The factory build method which creates the {@link RetryingCallerInterceptor} object
    *         according to the configuration.
    */
   @edu.umd.cs.findbugs.annotations.SuppressWarnings(value = "REC_CATCH_EXCEPTION",
       justification = "Convert thrown exception to unchecked")
   public RetryingCallerInterceptor build() {
-    RetryingCallerInterceptor ret = NO_OP_INTERCEPTOR;
+    // First priority: check for custom interceptor implementation
+    String customInterceptorClass =
+      conf.get(HConstants.HBASE_CLIENT_RETRYING_CALLER_INTERCEPTOR_IMPL);
+    if (customInterceptorClass != null && !customInterceptorClass.trim().isEmpty()) {
+      try {
+        Class<?> c = Class.forName(customInterceptorClass.trim());
+        Constructor<?> constructor = c.getDeclaredConstructor(Configuration.class);
+        constructor.setAccessible(true);
+        RetryingCallerInterceptor ret = (RetryingCallerInterceptor) constructor.newInstance(conf);
+        LOG.info("Using custom RetryingCallerInterceptor: {}", customInterceptorClass);
+        LOG.trace("Using {} for intercepting the RpcRetryingCaller", ret);
+        return ret;
+      } catch (Exception e) {
+        LOG.warn("Failed to instantiate custom interceptor: {}, falling back to default behavior",
+          customInterceptorClass, e);
+      }
+    }
+
+    // Second priority: use fast-fail interceptor if enabled, otherwise no-op
+    RetryingCallerInterceptor ret = buildDefaultInterceptor();
+    LOG.trace("Using {} for intercepting the RpcRetryingCaller", ret);
+    return ret;
+  }
+
+  private RetryingCallerInterceptor buildDefaultInterceptor() {
     if (failFast) {
       try {
         Class<?> c = conf.getClass(HConstants.HBASE_CLIENT_FAST_FAIL_INTERCEPTOR_IMPL,
           PreemptiveFastFailInterceptor.class);
         Constructor<?> constructor = c.getDeclaredConstructor(Configuration.class);
         constructor.setAccessible(true);
-        ret = (RetryingCallerInterceptor) constructor.newInstance(conf);
+        return (RetryingCallerInterceptor) constructor.newInstance(conf);
       } catch (Exception e) {
-        ret = new PreemptiveFastFailInterceptor(conf);
+        return new PreemptiveFastFailInterceptor(conf);
       }
     }
-    LOG.trace("Using " + ret.toString() + " for intercepting the RpcRetryingCaller");
-    return ret;
+    return NO_OP_INTERCEPTOR;
   }
 }

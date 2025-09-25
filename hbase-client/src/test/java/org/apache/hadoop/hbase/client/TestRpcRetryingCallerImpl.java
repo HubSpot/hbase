@@ -18,14 +18,23 @@
 package org.apache.hadoop.hbase.client;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import java.io.IOException;
+import java.util.Arrays;
+import java.util.List;
 import org.apache.hadoop.hbase.CallDroppedException;
 import org.apache.hadoop.hbase.CallQueueTooBigException;
 import org.apache.hadoop.hbase.HBaseClassTestRule;
 import org.apache.hadoop.hbase.HBaseServerException;
+import org.apache.hadoop.hbase.exceptions.PreemptiveFastFailException;
 import org.apache.hadoop.hbase.testclassification.ClientTests;
 import org.apache.hadoop.hbase.testclassification.SmallTests;
 import org.junit.ClassRule;
@@ -106,5 +115,141 @@ public class TestRpcRetryingCallerImpl {
     public Void call(int callTimeout) throws Exception {
       throw exceptionClass.getConstructor().newInstance();
     }
+  }
+
+  @Test
+  public void itCallsInterceptorLifecycleInCallWithoutRetries() throws Exception {
+    RetryingCallerInterceptor mockInterceptor = mock(RetryingCallerInterceptor.class);
+    RetryingCallerInterceptorContext mockContext = mock(RetryingCallerInterceptorContext.class);
+    RetryingCallable<String> mockCallable = mock(RetryingCallable.class);
+
+    when(mockInterceptor.createEmptyContext()).thenReturn(mockContext);
+    when(mockContext.prepare(mockCallable, 0)).thenReturn(mockContext);
+    when(mockCallable.call(1000)).thenReturn("success");
+
+    RpcRetryingCallerImpl<String> caller =
+      new RpcRetryingCallerImpl<>(100, 200, 3, mockInterceptor, 0, 0, null);
+
+    String result = caller.callWithoutRetries(mockCallable, 1000);
+
+    assertEquals("success", result);
+    verify(mockCallable).prepare(false);
+    verify(mockContext).setOperationStartTime(anyLong());
+    verify(mockContext).setRpcStartTime(anyLong());
+    verify(mockContext).setAttemptNumber(0);
+    verify(mockInterceptor).intercept(mockContext);
+    verify(mockInterceptor, never()).handleFailure(mockContext, null);
+    verify(mockInterceptor, never()).updateFailureInfo(mockContext);
+  }
+
+  @Test
+  public void itHandlesIOExceptionInCallWithoutRetries() throws Exception {
+    RetryingCallerInterceptor mockInterceptor = mock(RetryingCallerInterceptor.class);
+    RetryingCallerInterceptorContext mockContext = mock(RetryingCallerInterceptorContext.class);
+    RetryingCallable<String> mockCallable = mock(RetryingCallable.class);
+    IOException testException = new IOException("test failure");
+
+    when(mockInterceptor.createEmptyContext()).thenReturn(mockContext);
+    when(mockContext.prepare(mockCallable, 0)).thenReturn(mockContext);
+    when(mockCallable.call(1000)).thenThrow(testException);
+
+    RpcRetryingCallerImpl<String> caller =
+      new RpcRetryingCallerImpl<>(100, 200, 3, mockInterceptor, 0, 0, null);
+
+    try {
+      caller.callWithoutRetries(mockCallable, 1000);
+      fail("Expected IOException");
+    } catch (IOException e) {
+      assertSame(testException, e);
+    }
+
+    verify(mockInterceptor).handleFailure(mockContext, testException);
+    verify(mockInterceptor).updateFailureInfo(mockContext);
+  }
+
+  @Test
+  public void itPreservesPreemptiveFastFailExceptionInCallWithoutRetries() throws Exception {
+    RetryingCallerInterceptor mockInterceptor = mock(RetryingCallerInterceptor.class);
+    RetryingCallerInterceptorContext mockContext = mock(RetryingCallerInterceptorContext.class);
+    RetryingCallable<String> mockCallable = mock(RetryingCallable.class);
+    PreemptiveFastFailException testException = new PreemptiveFastFailException("fast fail");
+
+    when(mockInterceptor.createEmptyContext()).thenReturn(mockContext);
+    when(mockContext.prepare(mockCallable, 0)).thenReturn(mockContext);
+    when(mockCallable.call(1000)).thenThrow(testException);
+
+    RpcRetryingCallerImpl<String> caller =
+      new RpcRetryingCallerImpl<>(100, 200, 3, mockInterceptor, 0, 0, null);
+
+    try {
+      caller.callWithoutRetries(mockCallable, 1000);
+      fail("Expected PreemptiveFastFailException");
+    } catch (PreemptiveFastFailException e) {
+      assertSame(testException, e);
+    }
+
+    verify(mockInterceptor, never()).handleFailure(mockContext, testException);
+    verify(mockInterceptor, never()).updateFailureInfo(mockContext);
+  }
+
+  @Test
+  public void itHandlesRetriesExhaustedWithDetailsExceptionInCallWithoutRetries() throws Exception {
+    RetryingCallerInterceptor mockInterceptor = mock(RetryingCallerInterceptor.class);
+    RetryingCallerInterceptorContext mockContext = mock(RetryingCallerInterceptorContext.class);
+    RetryingCallable<String> mockCallable = mock(RetryingCallable.class);
+
+    // Create REWDE with some mock data
+    List<Throwable> causes = Arrays.asList(new IOException("cause1"), new IOException("cause2"));
+    List<Row> actions = Arrays.asList(mock(Row.class), mock(Row.class));
+    List<String> hostnames = Arrays.asList("host1:123", "host2:456");
+    RetriesExhaustedWithDetailsException rewde =
+      new RetriesExhaustedWithDetailsException(causes, actions, hostnames);
+
+    when(mockInterceptor.createEmptyContext()).thenReturn(mockContext);
+    when(mockContext.prepare(mockCallable, 0)).thenReturn(mockContext);
+    when(mockCallable.call(1000)).thenThrow(rewde);
+
+    RpcRetryingCallerImpl<String> caller =
+      new RpcRetryingCallerImpl<>(100, 200, 3, mockInterceptor, 0, 0, null);
+
+    try {
+      caller.callWithoutRetries(mockCallable, 1000);
+      fail("Expected RetriesExhaustedWithDetailsException");
+    } catch (RetriesExhaustedWithDetailsException e) {
+      assertSame(rewde, e);
+    }
+
+    verify(mockContext).setBatchFailures(causes);
+    verify(mockInterceptor).handleFailure(mockContext, rewde);
+    verify(mockInterceptor).updateFailureInfo(mockContext);
+  }
+
+  @Test
+  public void itHandlesInterceptorThrowingPreemptiveFastFailInCallWithoutRetries()
+    throws Exception {
+    RetryingCallerInterceptor mockInterceptor = mock(RetryingCallerInterceptor.class);
+    RetryingCallerInterceptorContext mockContext = mock(RetryingCallerInterceptorContext.class);
+    RetryingCallable<String> mockCallable = mock(RetryingCallable.class);
+    IOException originalException = new IOException("original");
+    PreemptiveFastFailException fastFailException =
+      new PreemptiveFastFailException("interceptor fast fail");
+
+    when(mockInterceptor.createEmptyContext()).thenReturn(mockContext);
+    when(mockContext.prepare(mockCallable, 0)).thenReturn(mockContext);
+    when(mockCallable.call(1000)).thenThrow(originalException);
+    when(mockInterceptor.handleFailure(mockContext, originalException))
+      .thenThrow(fastFailException);
+
+    RpcRetryingCallerImpl<String> caller =
+      new RpcRetryingCallerImpl<>(100, 200, 3, mockInterceptor, 0, 0, null);
+
+    try {
+      caller.callWithoutRetries(mockCallable, 1000);
+      fail("Expected PreemptiveFastFailException from interceptor");
+    } catch (PreemptiveFastFailException e) {
+      assertSame(fastFailException, e);
+    }
+
+    verify(mockInterceptor).updateFailureInfo(mockContext);
   }
 }
