@@ -582,6 +582,7 @@ public class HFileOutputFormat2 extends FileOutputFormat<ImmutableBytesWritable,
         "First region of table should have empty start key. Instead has: "
           + Bytes.toStringBinary(first.get()));
     }
+    int numPartitions = sorted.size();
     sorted.remove(sorted.first());
 
     // Write the actual file
@@ -604,7 +605,7 @@ public class HFileOutputFormat2 extends FileOutputFormat<ImmutableBytesWritable,
       writer.close();
     }
 
-    return sorted.size();
+    return numPartitions;
   }
 
   /**
