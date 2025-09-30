@@ -21,7 +21,6 @@ import static org.apache.hadoop.hbase.regionserver.HStoreFile.BULKLOAD_TASK_KEY;
 import static org.apache.hadoop.hbase.regionserver.HStoreFile.BULKLOAD_TIME_KEY;
 import static org.apache.hadoop.hbase.regionserver.HStoreFile.EXCLUDE_FROM_MINOR_COMPACTION_KEY;
 import static org.apache.hadoop.hbase.regionserver.HStoreFile.MAJOR_COMPACTION_KEY;
-
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
 import java.net.InetSocketAddress;
@@ -560,7 +559,7 @@ public class HFileOutputFormat2 extends FileOutputFormat<ImmutableBytesWritable,
    * contains the split points in startKeys.
    */
   @SuppressWarnings("deprecation")
-  private static void writePartitions(Configuration conf, Path partitionsPath,
+  private static int writePartitions(Configuration conf, Path partitionsPath,
     List<ImmutableBytesWritable> startKeys, boolean writeMultipleTables) throws IOException {
     LOG.info("Writing partition information to " + partitionsPath);
     if (startKeys.isEmpty()) {
@@ -603,6 +602,8 @@ public class HFileOutputFormat2 extends FileOutputFormat<ImmutableBytesWritable,
     } finally {
       writer.close();
     }
+
+    return sorted.size();
   }
 
   /**
@@ -719,9 +720,9 @@ public class HFileOutputFormat2 extends FileOutputFormat<ImmutableBytesWritable,
     // Use table's region boundaries for TOP split points.
     LOG.info("Configuring " + startKeys.size() + " reduce partitions "
       + "to match current region count for all tables");
-    job.setNumReduceTasks(startKeys.size());
 
-    configurePartitioner(job, startKeys, writeMultipleTables);
+    int numPartitions = configurePartitioner(job, startKeys, writeMultipleTables);
+    job.setNumReduceTasks(numPartitions);
     // Set compression algorithms based on column families
 
     conf.set(COMPRESSION_FAMILIES_CONF_KEY,
@@ -943,7 +944,7 @@ public class HFileOutputFormat2 extends FileOutputFormat<ImmutableBytesWritable,
    * Configure <code>job</code> with a TotalOrderPartitioner, partitioning against
    * <code>splitPoints</code>. Cleans up the partitions file after job exists.
    */
-  static void configurePartitioner(Job job, List<ImmutableBytesWritable> splitPoints,
+  static int configurePartitioner(Job job, List<ImmutableBytesWritable> splitPoints,
     boolean writeMultipleTables) throws IOException {
     Configuration conf = job.getConfiguration();
     // create the partitions file
@@ -952,12 +953,14 @@ public class HFileOutputFormat2 extends FileOutputFormat<ImmutableBytesWritable,
       conf.get(HConstants.TEMPORARY_FS_DIRECTORY_KEY, HConstants.DEFAULT_TEMPORARY_HDFS_DIRECTORY);
     Path partitionsPath = new Path(hbaseTmpFsDir, "partitions_" + UUID.randomUUID());
     fs.makeQualified(partitionsPath);
-    writePartitions(conf, partitionsPath, splitPoints, writeMultipleTables);
+    int numPartitions = writePartitions(conf, partitionsPath, splitPoints, writeMultipleTables);
     fs.deleteOnExit(partitionsPath);
 
     // configure job to use it
     job.setPartitionerClass(TotalOrderPartitioner.class);
     TotalOrderPartitioner.setPartitionFile(conf, partitionsPath);
+
+    return numPartitions;
   }
 
   @edu.umd.cs.findbugs.annotations.SuppressWarnings(
