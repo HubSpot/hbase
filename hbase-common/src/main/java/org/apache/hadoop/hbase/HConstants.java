@@ -162,6 +162,13 @@ public final class HConstants {
   /** Default value for the oldWALs directory size updater period */
   public static final int DEFAULT_HBASE_OLDWAL_DIR_SIZE_UPDATER_PERIOD = 300000;
 
+  /** Config for the oldest procedure age updater period */
+  public static final String HBASE_OLDEST_PROCEDURE_AGE_UPDATER_PERIOD =
+    "hbase.master.procedure.oldest.chore.interval.msec";
+
+  /** Default value for the oldest procedure age updater period */
+  public static final int DEFAULT_HBASE_OLDEST_PROCEDURE_AGE_UPDATER_PERIOD = 60000;
+
   /**
    * Config key for enable/disable automatically separate child regions to different region servers
    * in the procedure of split regions. One child will be kept to the server where parent region is

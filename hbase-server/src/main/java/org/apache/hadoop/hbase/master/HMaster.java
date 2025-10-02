@@ -427,6 +427,7 @@ public class HMaster extends HRegionServer implements MasterServices {
   private QuotaObserverChore quotaObserverChore;
   private SnapshotQuotaObserverChore snapshotQuotaChore;
   private OldWALsDirSizeChore oldWALsDirSizeChore;
+  private OldestProcedureAgeChore oldestProcedureAgeChore;
 
   private ProcedureExecutor<MasterProcedureEnv> procedureExecutor;
   private ProcedureStore procedureStore;
@@ -1346,6 +1347,9 @@ public class HMaster extends HRegionServer implements MasterServices {
     this.oldWALsDirSizeChore = new OldWALsDirSizeChore(this);
     getChoreService().scheduleChore(this.oldWALsDirSizeChore);
 
+    this.oldestProcedureAgeChore = new OldestProcedureAgeChore(this);
+    getChoreService().scheduleChore(this.oldestProcedureAgeChore);
+
     status.markComplete("Progress after master initialized complete");
   }
 
@@ -1892,6 +1896,7 @@ public class HMaster extends HRegionServer implements MasterServices {
       shutdownChore(regionsRecoveryChore);
       shutdownChore(rollingUpgradeChore);
       shutdownChore(oldWALsDirSizeChore);
+      shutdownChore(oldestProcedureAgeChore);
     }
   }
 

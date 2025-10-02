@@ -18,6 +18,7 @@
 package org.apache.hadoop.hbase.procedure2;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
@@ -28,6 +29,7 @@ import org.apache.hadoop.hbase.procedure2.ProcedureTestingUtility.NoopProcedure;
 import org.apache.hadoop.hbase.procedure2.store.NoopProcedureStore;
 import org.apache.hadoop.hbase.testclassification.MasterTests;
 import org.apache.hadoop.hbase.testclassification.SmallTests;
+import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
 import org.apache.hadoop.hbase.util.Threads;
 import org.junit.After;
 import org.junit.Before;
@@ -148,6 +150,56 @@ public class TestProcedureExecutor {
       ProcedureTestingUtility.waitProcedure(procExecutor, procId);
       ProcedureTestingUtility.assertProcNotFailed(procExecutor, procId);
     }
+  }
+
+  @Test
+  public void testUpdateOldestProcedureAge() throws Exception {
+    createNewExecutor(htu.getConfiguration(), 2);
+
+    // Test 1: No procedures -> age is 0
+    procExecutor.updateOldestProcedureAge();
+    assertEquals(0L, procExecutor.getOldestProcedureAge());
+
+    Semaphore latch1 = new Semaphore(2);
+    latch1.acquire(2);
+    BusyWaitProcedure proc1 = new BusyWaitProcedure(latch1);
+    long procId1 = procExecutor.submitProcedure(proc1);
+
+    // Wait to ensure proc1 has an older timestamp
+    Threads.sleepWithoutInterrupt(150);
+
+    Semaphore latch2 = new Semaphore(2);
+    latch2.acquire(2);
+    BusyWaitProcedure proc2 = new BusyWaitProcedure(latch2);
+    long procId2 = procExecutor.submitProcedure(proc2);
+
+    // Get actual submitted times of both procedures while they're active
+    long proc1SubmittedTime = procExecutor.getProcedure(procId1).getSubmittedTime();
+    long proc2SubmittedTime = procExecutor.getProcedure(procId2).getSubmittedTime();
+
+    procExecutor.updateOldestProcedureAge();
+    long age = procExecutor.getOldestProcedureAge();
+    long expectedAge = EnvironmentEdgeManager.currentTime() - proc1SubmittedTime;
+
+    // Age should match expected age within a small margin (10ms for method call overhead)
+    assertTrue(Math.abs(age - expectedAge) < 10);
+
+    // Complete proc1 and verify age now reflects proc2
+    latch1.release(2);
+    ProcedureTestingUtility.waitProcedure(procExecutor, procId1);
+    procExecutor.updateOldestProcedureAge();
+    long ageAfterProc1 = procExecutor.getOldestProcedureAge();
+    long expectedAgeProc2 = EnvironmentEdgeManager.currentTime() - proc2SubmittedTime;
+
+    assertTrue(Math.abs(ageAfterProc1 - expectedAgeProc2) < 10);
+
+    // Complete proc2
+    latch2.release(2);
+    ProcedureTestingUtility.waitProcedure(procExecutor, procId2);
+
+    // After all procedures complete, age should be 0
+    procExecutor.updateOldestProcedureAge();
+    assertEquals(0L, procExecutor.getOldestProcedureAge());
   }
 
   private int waitThreadCount(final int expectedThreads) {
