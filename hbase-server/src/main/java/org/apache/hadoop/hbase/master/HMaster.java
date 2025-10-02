@@ -464,6 +464,7 @@ public class HMaster extends HBaseServerBase<MasterRpcServices> implements Maste
   private QuotaObserverChore quotaObserverChore;
   private SnapshotQuotaObserverChore snapshotQuotaChore;
   private OldWALsDirSizeChore oldWALsDirSizeChore;
+  private OldestProcedureAgeChore oldestProcedureAgeChore;
 
   private ProcedureExecutor<MasterProcedureEnv> procedureExecutor;
   private ProcedureStore procedureStore;
@@ -1397,6 +1398,9 @@ public class HMaster extends HBaseServerBase<MasterRpcServices> implements Maste
     this.oldWALsDirSizeChore = new OldWALsDirSizeChore(this);
     getChoreService().scheduleChore(this.oldWALsDirSizeChore);
 
+    this.oldestProcedureAgeChore = new OldestProcedureAgeChore(this);
+    getChoreService().scheduleChore(this.oldestProcedureAgeChore);
+
     status.markComplete("Progress after master initialized complete");
   }
 
@@ -1957,6 +1961,7 @@ public class HMaster extends HBaseServerBase<MasterRpcServices> implements Maste
     shutdownChore(regionsRecoveryChore);
     shutdownChore(rollingUpgradeChore);
     shutdownChore(oldWALsDirSizeChore);
+    shutdownChore(oldestProcedureAgeChore);
   }
 
   /** Returns Get remote side's InetAddress */
@@ -4569,4 +4574,5 @@ public class HMaster extends HBaseServerBase<MasterRpcServices> implements Maste
         }
       });
   }
+
 }

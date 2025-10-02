@@ -246,4 +246,12 @@ public class MetricsMasterWrapperImpl implements MetricsMasterWrapper {
     }
     return master.getMasterWalManager().getOldWALsDirSize();
   }
+
+  @Override
+  public long getOldestProcedureAge() {
+    if (master == null || master.getMasterProcedureExecutor() == null) {
+      return 0;
+    }
+    return master.getMasterProcedureExecutor().getOldestProcedureAge();
+  }
 }

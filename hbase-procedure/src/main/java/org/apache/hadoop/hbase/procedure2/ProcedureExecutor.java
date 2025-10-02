@@ -251,6 +251,8 @@ public class ProcedureExecutor<TEnvironment> {
 
   private volatile long keepAliveTime;
 
+  private volatile long oldestProcedureAgeMs;
+
   /**
    * Scheduler/Queue that contains runnable procedures.
    */
@@ -1333,6 +1335,36 @@ public class ProcedureExecutor<TEnvironment> {
    */
   public Collection<Procedure<TEnvironment>> getActiveProceduresNoCopy() {
     return procedures.values();
+  }
+
+  /**
+   * Updates the age of the oldest active procedure.
+   */
+  public void updateOldestProcedureAge() {
+    if (procedures.isEmpty()) {
+      oldestProcedureAgeMs = 0L;
+      return;
+    }
+
+    long earliestTimestamp = Long.MAX_VALUE;
+
+    for (Procedure<TEnvironment> proc : procedures.values()) {
+      final long submittedTime = proc.getSubmittedTime();
+
+      if (earliestTimestamp == 0 || submittedTime < earliestTimestamp) {
+        earliestTimestamp = submittedTime;
+      }
+    }
+
+    oldestProcedureAgeMs = EnvironmentEdgeManager.currentTime() - earliestTimestamp;
+  }
+
+  /**
+   * Returns the age of the oldest active procedure in milliseconds.
+   * @return age in milliseconds, or 0 if no procedures are active.
+   */
+  public long getOldestProcedureAge() {
+    return oldestProcedureAgeMs;
   }
 
   /**

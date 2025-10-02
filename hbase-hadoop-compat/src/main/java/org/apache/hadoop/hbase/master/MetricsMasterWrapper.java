@@ -158,4 +158,10 @@ public interface MetricsMasterWrapper {
    * Get the size of old WALs directory in bytes.
    */
   long getOldWALsDirSize();
+
+  /**
+   * Get the age of the oldest active procedure.
+   * @return age in milliseconds of the oldest active procedure, or 0 if no procedures are active.
+   */
+  long getOldestProcedureAge();
 }
