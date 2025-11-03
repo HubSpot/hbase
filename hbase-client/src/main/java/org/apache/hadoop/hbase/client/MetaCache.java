@@ -18,23 +18,38 @@
 package org.apache.hadoop.hbase.client;
 
 import static org.apache.hadoop.hbase.util.ConcurrentMapUtils.computeIfAbsent;
-
+import java.io.IOException;
+import java.util.Arrays;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Set;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ConcurrentNavigableMap;
 import java.util.concurrent.CopyOnWriteArraySet;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
+import java.util.concurrent.ThreadPoolExecutor.DiscardPolicy;
+import java.util.concurrent.TimeUnit;
+import java.util.function.Supplier;
+import java.util.stream.Collectors;
+import org.apache.commons.lang3.StringUtils;
+import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.HRegionLocation;
+import org.apache.hadoop.hbase.MetaTableAccessor;
 import org.apache.hadoop.hbase.RegionLocations;
 import org.apache.hadoop.hbase.ServerName;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.types.CopyOnWriteArrayMap;
 import org.apache.hadoop.hbase.util.Bytes;
+import org.apache.hadoop.hbase.util.ReflectionUtils;
 import org.apache.yetus.audience.InterfaceAudience;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.apache.hbase.thirdparty.com.google.common.cache.Cache;
+import org.apache.hbase.thirdparty.com.google.common.cache.CacheBuilder;
+import org.apache.hbase.thirdparty.com.google.common.util.concurrent.ThreadFactoryBuilder;
 
 /**
  * A cache implementation for region locations from meta.
@@ -43,6 +58,15 @@ import org.slf4j.LoggerFactory;
 public class MetaCache {
 
   private static final Logger LOG = LoggerFactory.getLogger(MetaCache.class);
+
+  public static final String EXTRA_META_CACHE_CLEARING_ENABLED_SUPPLIER_IMPL = "hubspot.meta.cache.extra.clearing.supplier";
+  public static final String EXTRA_META_CACHE_DEBOUNCE_TIMEOUT_SUPPLIER_IMPL = "hubspot.meta.cache.debounce.timeout.ms.supplier";
+  private final Supplier<Boolean> extraMetaCacheClearingEnabled;  // this is a live config
+  private final Supplier<Long> extraMetaCacheDebounceTimeoutMillis;  // this is a live config
+  private final ScheduledExecutorService repopulateExecutorService;
+  private final Cache<TableName, ScheduledFuture<?>> tableRefreshesRan;
+  private static final String REPOPULATOR_THREAD_PREFIX = "meta-cache-repopulator-";
+
 
   /**
    * Map of table to table {@link HRegionLocation}s. <br>
@@ -62,9 +86,45 @@ public class MetaCache {
 
   private final MetricsConnection metrics;
 
-  public MetaCache(MetricsConnection metrics) {
+  private final ClusterConnection connection;
+
+
+  public MetaCache(MetricsConnection metrics, ClusterConnection connection) {
     this.metrics = metrics;
+
+    // HubSpot modification: at most every hubspot.meta.cache.debounce.timeout.ms, entirely clear and repopulate the
+    // meta cache for a table which has recently experienced meta clearing errors. We do this by recording the table name
+    // when the cache is cleared for a region, and then after that timeout, clearing the cache for the whole table
+    // in a background thread.
+    this.connection = connection;
+    Configuration conf = connection.getConfiguration();
+
+    extraMetaCacheClearingEnabled = createLiveConfig(conf, EXTRA_META_CACHE_CLEARING_ENABLED_SUPPLIER_IMPL, () -> conf.getBoolean("hubspot.meta.cache.extra.clearing", false));
+    extraMetaCacheDebounceTimeoutMillis = createLiveConfig(conf, EXTRA_META_CACHE_DEBOUNCE_TIMEOUT_SUPPLIER_IMPL, () -> conf.getLong("hubspot.meta.cache.debounce.timeout.ms", TimeUnit.MINUTES.toMillis(10)));
+
+    repopulateExecutorService = new ScheduledThreadPoolExecutor(1,
+      new ThreadFactoryBuilder().setNameFormat(REPOPULATOR_THREAD_PREFIX + "%s").setDaemon(true).build(),
+      new DiscardPolicy());
+
+    tableRefreshesRan = CacheBuilder
+      .newBuilder()
+      .maximumSize(conf.getLong("hubspot.meta.cache.debounce.cache.size", 1000))
+      .build();
+
   }
+
+  private <T> Supplier<T> createLiveConfig(Configuration conf, String configKey, Supplier<T> fallback) {
+    String className = conf.get(configKey);
+    if (StringUtils.isEmpty(className)) {
+      LOG.debug("No " + configKey + " is set.");
+      // fall back to non-live config
+      return fallback;
+    } else {
+      return ReflectionUtils.instantiateWithCustomCtor(className,
+        new Class[] { Configuration.class }, new Object[] { conf });
+    }
+  }
+
 
   /**
    * Search the cache for a location that fits our table and row key. Return null if no suitable
@@ -298,6 +358,9 @@ public class MetaCache {
    * @param tableName tableName
    */
   public synchronized void clearCache(final TableName tableName, final byte[] row) {
+    // HubSpot modification
+    delayedCacheRefreshForTable(tableName);
+
     ConcurrentMap<byte[], RegionLocations> tableLocations = getTableLocations(tableName);
 
     RegionLocations regionLocations = getCachedLocation(tableName, row);
@@ -332,6 +395,9 @@ public class MetaCache {
    * @param replicaId region replica id
    */
   public synchronized void clearCache(final TableName tableName, final byte[] row, int replicaId) {
+    // HubSpot modification
+    delayedCacheRefreshForTable(tableName);
+
     ConcurrentMap<byte[], RegionLocations> tableLocations = getTableLocations(tableName);
 
     RegionLocations regionLocations = getCachedLocation(tableName, row);
@@ -362,6 +428,9 @@ public class MetaCache {
    */
   public synchronized void clearCache(final TableName tableName, final byte[] row,
     ServerName serverName) {
+    // HubSpot modification
+    delayedCacheRefreshForTable(tableName);
+
     ConcurrentMap<byte[], RegionLocations> tableLocations = getTableLocations(tableName);
 
     RegionLocations regionLocations = getCachedLocation(tableName, row);
@@ -391,6 +460,9 @@ public class MetaCache {
    * @param hri The region in question.
    */
   public synchronized void clearCache(RegionInfo hri) {
+    // HubSpot modification
+    delayedCacheRefreshForTable(hri.getTable());
+
     ConcurrentMap<byte[], RegionLocations> tableLocations = getTableLocations(hri.getTable());
     RegionLocations regionLocations = tableLocations.get(hri.getStartKey());
     if (regionLocations != null) {
@@ -412,5 +484,98 @@ public class MetaCache {
       }
     }
   }
+
+  /**
+   * Clear and proactively repopulate the cache for each region in a given table. This is expensive so we should only do it
+   * occasionally. Don't run this in a critical path because it's doing a bunch of network calls.
+   */
+  private void repopulateCacheForTable(TableName tableName) {
+    // check again in case it changed during debounce time
+    if (!extraMetaCacheClearingEnabled.get()) {
+      LOG.debug("Not doing meta cache refresh because feature is disabled");
+      return;
+    }
+
+    try {
+      LOG.debug("Running metaScan for table " + tableName.getNameAsString());
+      MetaTableAccessor.scanMetaForTableRegions(this.connection, new CacheRegionLocationMetaVisitor(tableName), tableName);
+    } catch (Exception e) {
+      LOG.warn("Error while repopulating meta cache for table " + tableName);
+    }
+  }
+
+  private void delayedCacheRefreshForTable(TableName tableName) {
+    if (!extraMetaCacheClearingEnabled.get()) {
+      LOG.debug("Not scheduling meta cache refresh because feature is disabled");
+      return;
+    }
+    if (Thread.currentThread().getName().startsWith(REPOPULATOR_THREAD_PREFIX)) {
+      LOG.debug("Not scheduling meta cache refresh because we were called from within a refresh itself");
+      return;
+    }
+    synchronized (tableRefreshesRan) {
+      ScheduledFuture<?> lastScheduledRefresh = tableRefreshesRan.getIfPresent(tableName);
+      if (lastScheduledRefresh != null && lastScheduledRefresh.isDone()) {
+        tableRefreshesRan.invalidate(tableName);
+      } else if (lastScheduledRefresh != null && !lastScheduledRefresh.isDone()) {
+        LOG.debug("Not scheduling meta cache refresh because one has already been scheduled or is in progress for table " + tableName.getNameAsString());
+        return;
+      }
+
+      LOG.debug("Scheduling cache refresh for table " + tableName.getNameAsString());
+      ScheduledFuture<?> future = repopulateExecutorService.schedule(() -> repopulateCacheForTable(tableName), extraMetaCacheDebounceTimeoutMillis.get(), TimeUnit.MILLISECONDS);
+      tableRefreshesRan.put(tableName, future);
+    }
+
+  }
+
+  /** HubSpot addition */
+  private class CacheRegionLocationMetaVisitor implements MetaTableAccessor.Visitor {
+
+    private final TableName tableName;
+
+    private String printRegion(HRegionLocation regionLocation) {
+      return regionLocation.getRegionInfo().toString();
+    }
+
+    public CacheRegionLocationMetaVisitor(TableName tableName) {
+      this.tableName = tableName;
+    }
+
+    @Override public boolean visit(Result rowResult) throws IOException {
+      RegionLocations locations = MetaTableAccessor.getRegionLocations(rowResult);
+      if (locations == null) {
+        if (LOG.isTraceEnabled()) {
+          LOG.trace("Locations is null");
+        }
+        return true;
+      }
+
+      // The assumption in the MetaCache is that location.getServerName() is never null. Otherwise,
+      // NPEs can arise in a number of places. If a null servername is found, just skip caching it.
+      // It will be fetched through normal means later.
+      if (anyServerNameNull(locations)) {
+        return true;
+      }
+
+      if (LOG.isTraceEnabled()) {
+        LOG.trace("Regions: " + Arrays.stream(locations.getRegionLocations()).map(this::printRegion).collect(
+          Collectors.joining("\n")));
+      }
+      cacheLocation(tableName, locations);
+      return true;
+    }
+
+    private boolean anyServerNameNull(RegionLocations locations) {
+      for (HRegionLocation location : locations.getRegionLocations()) {
+        if (location.getServerName() == null) {
+          LOG.trace("ServerName for location " + location + " is null");
+          return true;
+        }
+      }
+      return false;
+    }
+  }
+
 
 }
