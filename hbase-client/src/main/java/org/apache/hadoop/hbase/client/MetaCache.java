@@ -33,7 +33,6 @@ import java.util.concurrent.ThreadPoolExecutor.DiscardPolicy;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
-import org.apache.commons.lang3.StringUtils;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.HRegionLocation;
@@ -43,7 +42,6 @@ import org.apache.hadoop.hbase.ServerName;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.types.CopyOnWriteArrayMap;
 import org.apache.hadoop.hbase.util.Bytes;
-import org.apache.hadoop.hbase.util.ReflectionUtils;
 import org.apache.yetus.audience.InterfaceAudience;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -59,8 +57,6 @@ public class MetaCache {
 
   private static final Logger LOG = LoggerFactory.getLogger(MetaCache.class);
 
-  public static final String EXTRA_META_CACHE_CLEARING_ENABLED_SUPPLIER_IMPL = "hubspot.meta.cache.extra.clearing.supplier";
-  public static final String EXTRA_META_CACHE_DEBOUNCE_TIMEOUT_SUPPLIER_IMPL = "hubspot.meta.cache.debounce.timeout.ms.supplier";
   private final Supplier<Boolean> extraMetaCacheClearingEnabled;  // this is a live config
   private final Supplier<Long> extraMetaCacheDebounceTimeoutMillis;  // this is a live config
   private final ScheduledExecutorService repopulateExecutorService;
@@ -99,8 +95,8 @@ public class MetaCache {
     this.connection = connection;
     Configuration conf = connection.getConfiguration();
 
-    extraMetaCacheClearingEnabled = createLiveConfig(conf, EXTRA_META_CACHE_CLEARING_ENABLED_SUPPLIER_IMPL, () -> conf.getBoolean("hubspot.meta.cache.extra.clearing", false));
-    extraMetaCacheDebounceTimeoutMillis = createLiveConfig(conf, EXTRA_META_CACHE_DEBOUNCE_TIMEOUT_SUPPLIER_IMPL, () -> conf.getLong("hubspot.meta.cache.debounce.timeout.ms", TimeUnit.MINUTES.toMillis(10)));
+    extraMetaCacheClearingEnabled = () -> conf.getBoolean("hubspot.meta.cache.extra.clearing", false);
+    extraMetaCacheDebounceTimeoutMillis = () -> conf.getLong("hubspot.meta.cache.debounce.timeout.ms", TimeUnit.MINUTES.toMillis(10));
 
     repopulateExecutorService = new ScheduledThreadPoolExecutor(1,
       new ThreadFactoryBuilder().setNameFormat(REPOPULATOR_THREAD_PREFIX + "%s").setDaemon(true).build(),
@@ -112,19 +108,6 @@ public class MetaCache {
       .build();
 
   }
-
-  private <T> Supplier<T> createLiveConfig(Configuration conf, String configKey, Supplier<T> fallback) {
-    String className = conf.get(configKey);
-    if (StringUtils.isEmpty(className)) {
-      LOG.debug("No " + configKey + " is set.");
-      // fall back to non-live config
-      return fallback;
-    } else {
-      return ReflectionUtils.instantiateWithCustomCtor(className,
-        new Class[] { Configuration.class }, new Object[] { conf });
-    }
-  }
-
 
   /**
    * Search the cache for a location that fits our table and row key. Return null if no suitable
