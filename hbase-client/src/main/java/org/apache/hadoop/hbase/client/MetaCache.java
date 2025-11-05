@@ -518,7 +518,7 @@ public class MetaCache {
     private final TableName tableName;
 
     private String printRegion(HRegionLocation regionLocation) {
-      return regionLocation.getRegionInfo().toString();
+      return regionLocation.getRegion().toString();
     }
 
     public CacheRegionLocationMetaVisitor(TableName tableName) {
