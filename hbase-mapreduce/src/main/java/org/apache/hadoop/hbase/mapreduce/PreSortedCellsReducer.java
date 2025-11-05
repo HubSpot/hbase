@@ -26,13 +26,10 @@ import org.apache.hadoop.hbase.io.ImmutableBytesWritable;
 import org.apache.hadoop.hbase.util.OrderPreservedMapReduceExtendedCell;
 import org.apache.hadoop.mapreduce.Reducer;
 import org.apache.yetus.audience.InterfaceAudience;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 @InterfaceAudience.Private
 public class PreSortedCellsReducer extends Reducer<KeyOnlyCellComparable,
   OrderPreservedMapReduceExtendedCell, ImmutableBytesWritable, Cell> {
-  private static final Logger LOG = LoggerFactory.getLogger(PreSortedCellsReducer.class);
 
   @Override
   protected void reduce(KeyOnlyCellComparable key,

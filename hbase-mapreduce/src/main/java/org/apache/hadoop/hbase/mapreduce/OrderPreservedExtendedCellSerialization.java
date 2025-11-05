@@ -30,7 +30,9 @@ import org.apache.hadoop.hbase.util.OrderPreservedMapReduceExtendedCell;
 import org.apache.hadoop.io.serializer.Deserializer;
 import org.apache.hadoop.io.serializer.Serialization;
 import org.apache.hadoop.io.serializer.Serializer;
+import org.apache.yetus.audience.InterfaceAudience;
 
+@InterfaceAudience.Private
 public class OrderPreservedExtendedCellSerialization
   implements Serialization<OrderPreservedMapReduceExtendedCell> {
 
