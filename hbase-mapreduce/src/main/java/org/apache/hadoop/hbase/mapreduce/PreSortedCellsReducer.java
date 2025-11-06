@@ -40,7 +40,9 @@ public class PreSortedCellsReducer extends Reducer<KeyOnlyCellComparable,
       Comparator.comparingInt(OrderPreservedMapReduceExtendedCell::getOrder).reversed());
 
     for (OrderPreservedMapReduceExtendedCell cell : values) {
-      cells.add(cell);
+      OrderPreservedMapReduceExtendedCell copy =
+        new OrderPreservedMapReduceExtendedCell(cell.deepClone(), cell.getOrder());
+      cells.add(copy);
     }
 
     int index = 0;
