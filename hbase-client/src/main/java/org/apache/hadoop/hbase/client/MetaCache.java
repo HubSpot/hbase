@@ -147,7 +147,7 @@ public class MetaCache {
     }
 
     if (LOG.isTraceEnabled()) {
-      LOG.trace("Requested row {} comes after region end key of {} for cached location {}",
+      LOG.trace("Cache miss: Requested row {} comes after region end key of {} for cached location {}",
         Bytes.toStringBinary(row), Bytes.toStringBinary(endKey), possibleRegion);
     }
     // Passed all the way through, so we got nothing - complete cache miss
