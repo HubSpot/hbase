@@ -19,7 +19,6 @@ package org.apache.hadoop.hbase.client;
 
 import static com.codahale.metrics.MetricRegistry.name;
 import static org.apache.hadoop.hbase.util.ConcurrentMapUtils.computeIfAbsent;
-
 import com.codahale.metrics.Counter;
 import com.codahale.metrics.Histogram;
 import com.codahale.metrics.JmxReporter;
@@ -41,10 +40,10 @@ import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.ipc.RemoteException;
 import org.apache.yetus.audience.InterfaceAudience;
-
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.apache.hbase.thirdparty.com.google.protobuf.Descriptors.MethodDescriptor;
 import org.apache.hbase.thirdparty.com.google.protobuf.Message;
-
 import org.apache.hadoop.hbase.shaded.protobuf.generated.ClientProtos.ClientService;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.ClientProtos.MutateRequest;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.ClientProtos.MutationProto.MutationType;
@@ -60,6 +59,7 @@ import org.apache.hadoop.hbase.shaded.protobuf.generated.ClientProtos.MutationPr
  */
 @InterfaceAudience.Private
 public final class MetricsConnection implements StatisticTrackable {
+  private static final Logger LOG = LoggerFactory.getLogger(MetricsConnection.class);
 
   private static final ConcurrentMap<String, MetricsConnection> METRICS_INSTANCES =
     new ConcurrentHashMap<>();
@@ -846,6 +846,9 @@ public final class MetricsConnection implements StatisticTrackable {
   }
 
   public void incrCacheDroppingExceptions(Object exception) {
+    if (LOG.isTraceEnabled()) {
+      LOG.trace("Cache dropping exception {}", exception, new RuntimeException("For a stacktrace"));
+    }
     getMetric(
       CACHE_BASE + (exception == null ? UNKNOWN_EXCEPTION : exception.getClass().getSimpleName()),
       cacheDroppingExceptions, counterFactory).inc();

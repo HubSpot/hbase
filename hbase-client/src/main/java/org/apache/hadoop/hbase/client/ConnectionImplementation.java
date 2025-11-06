@@ -2164,6 +2164,13 @@ public class ConnectionImplementation implements ClusterConnection, Closeable {
   @Override
   public void updateCachedLocations(final TableName tableName, byte[] regionName, byte[] rowkey,
     final Object exception, final ServerName source) {
+    if (LOG.isTraceEnabled()) {
+      if (exception instanceof Throwable) {
+        LOG.trace("Updating cache due to exception", (Throwable) exception);
+      } else {
+        LOG.trace("Non-throwable exception {}", exception);
+      }
+    }
     if (rowkey == null || tableName == null) {
       LOG.warn("Coding error, see method javadoc. row=" + (rowkey == null ? "null" : rowkey)
         + ", tableName=" + (tableName == null ? "null" : tableName));
@@ -2179,6 +2186,9 @@ public class ConnectionImplementation implements ClusterConnection, Closeable {
       // we do not know which region, so just remove the cache entry for the row and server
       if (metrics != null) {
         metrics.incrCacheDroppingExceptions(exception);
+      }
+      if (LOG.isTraceEnabled()) {
+        LOG.trace("Clearing cache for null regionName");
       }
       metaCache.clearCache(tableName, rowkey, source);
       return;
@@ -2230,6 +2240,9 @@ public class ConnectionImplementation implements ClusterConnection, Closeable {
 
     // If we're here, it means that can cannot be sure about the location, so we remove it from
     // the cache. Do not send the source because source can be a new server in the same host:port
+    if (LOG.isTraceEnabled()) {
+      LOG.trace("Clearing cache for a region");
+    }
     metaCache.clearCache(regionInfo);
   }
 

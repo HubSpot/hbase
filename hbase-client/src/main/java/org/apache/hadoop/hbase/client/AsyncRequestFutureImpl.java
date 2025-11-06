@@ -53,7 +53,6 @@ import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
 import org.apache.yetus.audience.InterfaceAudience;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
 import org.apache.hbase.thirdparty.com.google.common.base.Strings;
 
 /**
@@ -800,6 +799,9 @@ class AsyncRequestFutureImpl<CResult> implements AsyncRequestFuture {
    */
   private void receiveGlobalFailure(MultiAction rsActions, ServerName server, int numAttempt,
     Throwable t) {
+    if (LOG.isTraceEnabled()) {
+      LOG.trace("Global failure for server {}", server.getServerName());
+    }
     errorsByServer.reportServerError(server);
     Retry canRetry = errorsByServer.canTryMore(numAttempt) ? Retry.YES : Retry.NO_RETRIES_EXHAUSTED;
     boolean clearServerCache;
@@ -984,6 +986,9 @@ class AsyncRequestFutureImpl<CResult> implements AsyncRequestFuture {
         // Failure: retry if it's make sense else update the errors lists
         if (result instanceof Throwable) {
           Throwable actionException = (Throwable) result;
+          if (LOG.isTraceEnabled()) {
+            LOG.trace("Throwable result from MultiAction, server: {} is regionFailureRegistered: {}", server.getServerName(), regionFailureRegistered, actionException);
+          }
           Row row = sentAction.getAction();
           lastException = regionException != null
             ? regionException

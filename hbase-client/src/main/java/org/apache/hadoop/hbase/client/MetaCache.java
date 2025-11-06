@@ -296,6 +296,9 @@ public class MetaCache {
    * Synchronized because of calls in cacheLocation which need to be executed atomically
    */
   public synchronized void clearCache(final ServerName serverName) {
+    if (LOG.isTraceEnabled()) {
+      LOG.trace("Received request to clear cache for server {}", serverName);
+    }
     // Prior to synchronizing this method, we used to do another check below while synchronizing
     // on cachedServers. This is no longer necessary since we moved synchronization up.
     // Prior reason:
@@ -342,6 +345,9 @@ public class MetaCache {
    */
   public synchronized void clearCache(final TableName tableName, final byte[] row) {
     // HubSpot modification
+    if (LOG.isTraceEnabled()) {
+      LOG.trace("Received request to clear cache for table/row {}/{}", tableName, Bytes.toStringBinary(row));
+    }
     delayedCacheRefreshForTable(tableName);
 
     ConcurrentMap<byte[], RegionLocations> tableLocations = getTableLocations(tableName);
@@ -365,7 +371,7 @@ public class MetaCache {
    */
   public synchronized void clearCache(final TableName tableName) {
     if (LOG.isTraceEnabled()) {
-      LOG.trace("Removed all cached region locations for table " + tableName);
+      LOG.trace("Removing all cached region locations for table " + tableName);
     }
     this.cachedRegionLocations.remove(tableName);
   }
@@ -379,6 +385,9 @@ public class MetaCache {
    */
   public synchronized void clearCache(final TableName tableName, final byte[] row, int replicaId) {
     // HubSpot modification
+    if (LOG.isTraceEnabled()) {
+      LOG.trace("Received request to clear cache for table/row/replica {}/{}/{}", tableName, Bytes.toStringBinary(row), replicaId);
+    }
     delayedCacheRefreshForTable(tableName);
 
     ConcurrentMap<byte[], RegionLocations> tableLocations = getTableLocations(tableName);
@@ -412,6 +421,9 @@ public class MetaCache {
   public synchronized void clearCache(final TableName tableName, final byte[] row,
     ServerName serverName) {
     // HubSpot modification
+    if (LOG.isTraceEnabled()) {
+      LOG.trace("Received request to clear cache for table/row/server {}/{}/{}", tableName, Bytes.toStringBinary(row), serverName);
+    }
     delayedCacheRefreshForTable(tableName);
 
     ConcurrentMap<byte[], RegionLocations> tableLocations = getTableLocations(tableName);
@@ -444,6 +456,9 @@ public class MetaCache {
    */
   public synchronized void clearCache(RegionInfo hri) {
     // HubSpot modification
+    if (LOG.isTraceEnabled()) {
+      LOG.trace("Received request to clear cache for region {}", hri.getShortNameToLog());
+    }
     delayedCacheRefreshForTable(hri.getTable());
 
     ConcurrentMap<byte[], RegionLocations> tableLocations = getTableLocations(hri.getTable());
@@ -469,6 +484,7 @@ public class MetaCache {
   }
 
   /**
+   * HubSpot addition
    * Clear and proactively repopulate the cache for each region in a given table. This is expensive so we should only do it
    * occasionally. Don't run this in a critical path because it's doing a bunch of network calls.
    */
@@ -559,6 +575,5 @@ public class MetaCache {
       return false;
     }
   }
-
 
 }
