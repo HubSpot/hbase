@@ -36,8 +36,8 @@ public class PreSortedCellsReducer extends Reducer<KeyOnlyCellComparable,
     Iterable<OrderPreservedMapReduceExtendedCell> values, Context context)
     throws IOException, InterruptedException {
 
-    PriorityQueue<OrderPreservedMapReduceExtendedCell> cells =
-      new PriorityQueue<>(Comparator.comparingInt(OrderPreservedMapReduceExtendedCell::getOrder).reversed());
+    PriorityQueue<OrderPreservedMapReduceExtendedCell> cells = new PriorityQueue<>(
+      Comparator.comparingInt(OrderPreservedMapReduceExtendedCell::getOrder).reversed());
 
     for (OrderPreservedMapReduceExtendedCell cell : values) {
       cells.add(cell);
