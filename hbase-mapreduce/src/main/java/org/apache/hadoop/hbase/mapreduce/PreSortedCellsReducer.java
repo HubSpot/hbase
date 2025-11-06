@@ -19,7 +19,7 @@ package org.apache.hadoop.hbase.mapreduce;
 
 import java.io.IOException;
 import java.util.Comparator;
-import java.util.TreeSet;
+import java.util.PriorityQueue;
 import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.CellUtil;
 import org.apache.hadoop.hbase.io.ImmutableBytesWritable;
@@ -36,15 +36,15 @@ public class PreSortedCellsReducer extends Reducer<KeyOnlyCellComparable,
     Iterable<OrderPreservedMapReduceExtendedCell> values, Context context)
     throws IOException, InterruptedException {
 
-    TreeSet<OrderPreservedMapReduceExtendedCell> cells =
-      new TreeSet<>(Comparator.comparingInt(OrderPreservedMapReduceExtendedCell::getOrder));
+    PriorityQueue<OrderPreservedMapReduceExtendedCell> cells =
+      new PriorityQueue<>(Comparator.comparingInt(OrderPreservedMapReduceExtendedCell::getOrder).reversed());
 
     for (OrderPreservedMapReduceExtendedCell cell : values) {
       cells.add(cell);
     }
 
     int index = 0;
-    for (OrderPreservedMapReduceExtendedCell cell : cells.descendingSet()) {
+    for (OrderPreservedMapReduceExtendedCell cell : cells) {
       context.write(new ImmutableBytesWritable(CellUtil.cloneRow(key.getCell())), cell);
 
       if (++index % 100 == 0) {
