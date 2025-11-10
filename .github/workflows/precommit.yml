@@ -71,32 +71,20 @@ jobs:
         run: |
           WORKDIR="${GITHUB_WORKSPACE}/${{ matrix.workdir }}"
           echo "WORKDIR=${WORKDIR}" >> $GITHUB_ENV
-          echo "YETUSDIR=${WORKDIR}/${YETUS_REL}" >> $GITHUB_ENV
-          echo "SOURCEDIR=${WORKDIR}/${SRC_REL}" >> $GITHUB_ENV
+          echo "SOURCEDIR=${GITHUB_WORKSPACE}" >> $GITHUB_ENV
           echo "PATCHDIR=${WORKDIR}/${PATCH_REL}" >> $GITHUB_ENV
-          echo "DOCKERFILE=${WORKDIR}/${SRC_REL}/dev-support/docker/Dockerfile" >> $GITHUB_ENV
-          echo "CACHE_APACHE_ARTIFACT=${WORKDIR}/${SRC_REL}/dev-support/jenkins-scripts/cache-apache-project-artifact.sh" >> $GITHUB_ENV
-          echo "YETUS_DRIVER=${WORKDIR}/${SRC_REL}/dev-support/jenkins_precommit_github_yetus.sh" >> $GITHUB_ENV
-          echo "HIDE_OLD_COMMENTS=${WORKDIR}/${SRC_REL}/dev-support/gh_hide_old_comments.sh" >> $GITHUB_ENV
+          echo "HIDE_OLD_COMMENTS=${GITHUB_WORKSPACE}/dev-support/gh_hide_old_comments.sh" >> $GITHUB_ENV
 
           # Set matrix-specific environment variables
           echo "PLUGINS=${{ matrix.plugins }}" >> $GITHUB_ENV
-          echo "SET_JAVA_HOME=/opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/${{ matrix.java-version }}*/x64" >> $GITHUB_ENV
+          echo "SET_JAVA_HOME=${JAVA_HOME}" >> $GITHUB_ENV
           echo "HADOOP_PROFILE=${{ matrix.hadoop-profile }}" >> $GITHUB_ENV
           echo "WORKDIR_REL=${{ matrix.workdir }}" >> $GITHUB_ENV
           echo "SKIP_ERRORPRONE=${{ matrix.skip-errorprone }}" >> $GITHUB_ENV
 
           # Create working directories
           mkdir -p "${WORKDIR}"
-          mkdir -p "${WORKDIR}/${SRC_REL}"
-          mkdir -p "${WORKDIR}/${YETUS_REL}"
           mkdir -p "${WORKDIR}/${PATCH_REL}"
-
-      - name: Set up JDK ${{ matrix.java-version }}
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'temurin'
-          java-version: ${{ matrix.java-version }}
 
       - name: Checkout source code
         uses: actions/checkout@v4
@@ -104,47 +92,27 @@ jobs:
           path: ${{ matrix.workdir }}/src
           fetch-depth: 0
 
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y python3 python3-pip
-          pip3 install --upgrade pip
-
-      - name: Download and extract Apache Yetus
-        working-directory: ${{ env.YETUSDIR }}
-        run: |
-          "${CACHE_APACHE_ARTIFACT}" \
-            --keys 'https://downloads.apache.org/yetus/KEYS' \
-            --verify-tar-gz \
-            ./apache-yetus-${YETUS_VERSION}-bin.tar.gz \
-            yetus/${YETUS_VERSION}/apache-yetus-${YETUS_VERSION}-bin.tar.gz
-          tar --strip-components=1 -xzf apache-yetus-${YETUS_VERSION}-bin.tar.gz
-          rm apache-yetus-${YETUS_VERSION}-bin.tar.gz
-
       - name: Run Yetus test-patch
         id: test-patch
         continue-on-error: true
-        working-directory: ${{ env.WORKDIR }}
+        uses: apache/yetus-test-patch-action@0.15.1
+        with:
+          patchdir: ${{ matrix.workdir }}/output
+          basedir: ${{ github.workspace }}
+          buildtool: maven
+          plugins: ${{ matrix.plugins }}
         env:
-          GITHUB_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_USER: ${{ github.actor }}
-          BUILD_URL_ARTIFACTS: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          EXCLUDE_TESTS_URL: ${{ github.server_url }}/${{ github.repository }}/actions/workflows/find-flaky-tests.yml/runs/latest/artifacts
-        run: |
-          hostname -a
-          pwd
-          ls -la
-          printenv 2>&1 | sort
-          echo "[INFO] Launching Yetus via ${YETUS_DRIVER}"
-          set +e
-          "${YETUS_DRIVER}"
-          EXIT_CODE=$?
-          set -e
-          echo "exit_code=${EXIT_CODE}" >> $GITHUB_OUTPUT
-          if [ ${EXIT_CODE} -ne 0 ]; then
-            echo "Test-patch failed with exit code ${EXIT_CODE}"
-          fi
-          exit 0
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HADOOP_PROFILE: ${{ matrix.hadoop-profile }}
+          JAVA_HOME: ${{ env.JAVA_HOME }}
+          BUILD_THREAD: ${{ env.BUILD_THREAD }}
+          SUREFIRE_FIRST_PART_FORK_COUNT: ${{ env.SUREFIRE_FIRST_PART_FORK_COUNT }}
+          SUREFIRE_SECOND_PART_FORK_COUNT: ${{ env.SUREFIRE_SECOND_PART_FORK_COUNT }}
+          AUTHOR_IGNORE_LIST: ${{ env.AUTHOR_IGNORE_LIST }}
+          BLANKS_EOL_IGNORE_FILE: ${{ env.BLANKS_EOL_IGNORE_FILE }}
+          BLANKS_TABS_IGNORE_FILE: ${{ env.BLANKS_TABS_IGNORE_FILE }}
+          TESTS_FILTER: ${{ env.TESTS_FILTER }}
+          SKIP_ERRORPRONE: ${{ matrix.skip-errorprone }}
 
       - name: Process site artifacts
         if: matrix.name == 'general-check'
