@@ -2239,6 +2239,7 @@ public class ConnectionImplementation implements ClusterConnection, Closeable {
     // If it seems like the server is completely gone and the problem is not just this region,
     // e.g. we got a "Connection refused" ConnectException, we can clear the whole server from the cache.
     if (metaServerClearingExceptionsEnabled.get() && ClientExceptionsUtil.isMetaServerClearingException(exception)) {
+      LOG.trace("Clearing cache for server {} based on exception", source.getServerName(), (Throwable) exception);
       metaCache.clearCache(source);
     } else {
       //Do not send the source because source can be serving other regions
