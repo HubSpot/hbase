@@ -192,6 +192,8 @@ public class ConnectionImplementation implements ClusterConnection, Closeable {
     "hbase.client.master.state.cache.timeout.sec";
   private static final Logger LOG = LoggerFactory.getLogger(ConnectionImplementation.class);
 
+  private static Supplier<Boolean> metaServerClearingExceptionsEnabled;
+
   // The mode tells if HedgedRead, LoadBalance mode is supported.
   // The default mode is CatalogReplicaMode.None.
   private CatalogReplicaMode metaReplicaMode;
@@ -311,6 +313,7 @@ public class ConnectionImplementation implements ClusterConnection, Closeable {
   ConnectionImplementation(Configuration conf, ExecutorService pool, User user,
     ConnectionRegistry registry, Map<String, byte[]> connectionAttributes) throws IOException {
     this.conf = conf;
+    metaServerClearingExceptionsEnabled = () -> conf.getBoolean("hubspot.meta.server.clearing.exceptions.enabled", false);
     this.user = user;
     if (user != null && user.isLoginFromKeytab()) {
       spawnRenewalChore(user.getUGI());
@@ -2235,7 +2238,7 @@ public class ConnectionImplementation implements ClusterConnection, Closeable {
     // the cache.
     // If it seems like the server is completely gone and the problem is not just this region,
     // e.g. we got a "Connection refused" ConnectException, we can clear the whole server from the cache.
-    if (ClientExceptionsUtil.isMetaServerClearingException(exception)) {
+    if (metaServerClearingExceptionsEnabled.get() && ClientExceptionsUtil.isMetaServerClearingException(exception)) {
       metaCache.clearCache(source);
     } else {
       //Do not send the source because source can be serving other regions
