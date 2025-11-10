@@ -24,6 +24,7 @@ import java.io.SyncFailedException;
 import java.lang.reflect.UndeclaredThrowableException;
 import java.net.ConnectException;
 import java.net.SocketTimeoutException;
+import java.net.UnknownHostException;
 import java.nio.channels.ClosedChannelException;
 import java.util.Set;
 import java.util.concurrent.TimeoutException;
@@ -106,6 +107,26 @@ public final class ClientExceptionsUtil {
 
     return null;
   }
+
+  private static final ImmutableSet<Class<? extends Throwable>> METACACHE_SERVER_CLEARING_EXCEPTIONS =
+    ImmutableSet.of(ConnectException.class, UnknownHostException.class);
+
+  /**
+   * Look for an exception which indicates we should clear the meta cache for an entire server,
+   * rather than for just one region.
+   */
+  public static boolean isMetaServerClearingException(Object e) {
+    if (!(e instanceof Throwable)) {
+      return false;
+    }
+    for (Class<? extends Throwable> clazz : METACACHE_SERVER_CLEARING_EXCEPTIONS) {
+      if (clazz.isAssignableFrom(e.getClass())) {
+        return true;
+      }
+    }
+    return false;
+  }
+
 
   // This list covers most connectivity exceptions but not all.
   // For example, in SocketOutputStream a plain IOException is thrown at times when the channel is

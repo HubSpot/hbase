@@ -2232,8 +2232,15 @@ public class ConnectionImplementation implements ClusterConnection, Closeable {
     }
 
     // If we're here, it means that can cannot be sure about the location, so we remove it from
-    // the cache. Do not send the source because source can be a new server in the same host:port
-    metaCache.clearCache(regionInfo);
+    // the cache.
+    // If it seems like the server is completely gone and the problem is not just this region,
+    // e.g. we got a "Connection refused" ConnectException, we can clear the whole server from the cache.
+    if (ClientExceptionsUtil.isMetaServerClearingException(exception)) {
+      metaCache.clearCache(source);
+    } else {
+      //Do not send the source because source can be serving other regions
+      metaCache.clearCache(regionInfo);
+    }
   }
 
   @Override
