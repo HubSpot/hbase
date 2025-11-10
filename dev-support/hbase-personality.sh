@@ -71,11 +71,11 @@ function personality_globals
   #shellcheck disable=SC2034
   PROJECT_NAME=hbase
   #shellcheck disable=SC2034
-  PATCH_BRANCH_DEFAULT=master
+  PATCH_BRANCH_DEFAULT=hubspot-2.6
   #shellcheck disable=SC2034
   JIRA_ISSUE_RE='^HBASE-[0-9]+$'
   #shellcheck disable=SC2034
-  GITHUB_REPO="apache/hbase"
+  GITHUB_REPO="HubSpot/hbase"
 
   # TODO use PATCH_BRANCH to select jdk versions to use.
 
