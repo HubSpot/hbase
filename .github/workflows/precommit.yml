@@ -63,7 +63,7 @@ jobs:
             hadoop-profile: '3.0'
             workdir: 'yetus-jdk17-hadoop3-check'
             skip-errorprone: true
-            report-name: 'PR JDK17 Hadoop3 Check Report'
+            report-name: 'PR JDK17+Hadoop3 Check Report'
 
     steps:
       - name: Setup environment paths
@@ -146,8 +146,8 @@ jobs:
           fi
           exit 0
 
-      - name: Process site artifacts (general check only)
-        if: matrix.name == 'general-check' && always()
+      - name: Process site artifacts
+        if: matrix.name == 'general-check'
         working-directory: ${{ env.WORKDIR }}
         run: |
           if [ -d "${PATCHDIR}/branch-site" ]; then
@@ -170,8 +170,8 @@ jobs:
             echo "No patch-site, skipping"
           fi
 
-      - name: Process test logs (JDK check only)
-        if: matrix.name == 'jdk17-hadoop3-check' && always()
+      - name: Process test logs
+        if: matrix.name == 'jdk17-hadoop3-check'
         working-directory: ${{ env.WORKDIR }}
         run: |
           if [ -d "${PATCHDIR}/archiver" ]; then
@@ -195,14 +195,6 @@ jobs:
             echo "No test_logs.zip, skipping"
           fi
 
-      - name: Publish test results
-        if: matrix.name == 'jdk17-hadoop3-check' && always()
-        uses: EnricoMi/publish-unit-test-result-action@v2
-        with:
-          check_name: JDK17 Hadoop3 Test Results
-          junit_files: ${{ matrix.workdir }}/src/**/target/**/TEST-*.xml
-          fail_on: nothing
-
       - name: Archive artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -223,8 +215,8 @@ jobs:
           path: ${{ matrix.workdir }}/output/report.html
           retention-days: 15
 
-      - name: Hide old PR comments (general check only)
-        if: matrix.name == 'general-check' && always()
+      - name: Hide old PR comments
+        if: matrix.name == 'general-check'
         continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
