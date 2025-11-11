@@ -79,9 +79,7 @@ import org.apache.hbase.thirdparty.com.google.common.collect.ImmutableList;
  * @see ConnectionFactory
  * @see Connection
  * @see Table
- * @since 0.99.0
- *
- * trivial change to trigger build
+ * @since 0.99.0 trivial change to trigger build
  */
 @InterfaceAudience.Public
 public interface Admin extends Abortable, Closeable {
