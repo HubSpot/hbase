@@ -52,14 +52,14 @@ jobs:
         include:
           - name: 'general-check'
             plugins: 'all,-javadoc,-jira,-shadedjars,-unit'
-            java-version: '17'
+            java-home: '/usr/lib/jvm/java-17'
             hadoop-profile: '3.0'
             workdir: 'yetus-general-check'
             skip-errorprone: false
             report-name: 'PR General Check Report'
           - name: 'jdk17-hadoop3-check'
             plugins: 'compile,github,htmlout,javac,javadoc,maven,mvninstall,shadedjars,unit'
-            java-version: '17'
+            java-home: '/usr/lib/jvm/java-17'
             hadoop-profile: '3.0'
             workdir: 'yetus-jdk17-hadoop3-check'
             skip-errorprone: true
@@ -88,7 +88,7 @@ jobs:
 
           # Set matrix-specific environment variables
           echo "PLUGINS=${{ matrix.plugins }}" >> $GITHUB_ENV
-          echo "SET_JAVA_HOME=${JAVA_HOME}" >> $GITHUB_ENV
+          echo "SET_JAVA_HOME=${{ matrix.java-home }}" >> $GITHUB_ENV
           echo "HADOOP_PROFILE=${{ matrix.hadoop-profile }}" >> $GITHUB_ENV
           echo "WORKDIR_REL=${{ matrix.workdir }}" >> $GITHUB_ENV
           echo "SKIP_ERRORPRONE=${{ matrix.skip-errorprone }}" >> $GITHUB_ENV
