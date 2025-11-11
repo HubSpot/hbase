@@ -66,12 +66,6 @@ jobs:
             report-name: 'PR JDK17+Hadoop3 Check Report'
 
     steps:
-      - name: Set up JDK ${{ matrix.java-version }}
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'temurin'
-          java-version: ${{ matrix.java-version }}
-
       - name: Checkout source code
         uses: actions/checkout@v4
         with:
