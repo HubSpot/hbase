@@ -35,7 +35,9 @@ env:
   BLANKS_TABS_IGNORE_FILE: 'dev-support/blanks-tabs-ignore.txt'
   ARCHIVE_PATTERN_LIST: 'TEST-*.xml,org.apache.h*.txt,*.dumpstream,*.dump'
   TESTS_FILTER: 'checkstyle,javac,javadoc,pylint,shellcheck,shelldocs,blanks,perlcritic,ruby-lint,rubocop'
-  BUILD_THREAD: 4
+  SUREFIRE_FIRST_PART_FORK_COUNT: '1C'
+  SUREFIRE_SECOND_PART_FORK_COUNT: '1C'
+  SUREFIRE_REUSE_FORKS: 'true'
   ASF_NIGHTLIES: 'https://nightlies.apache.org'
 
 jobs:

@@ -1012,6 +1012,7 @@
     <surefire.testFailureIgnore>false</surefire.testFailureIgnore>
     <test.output.tofile>true</test.output.tofile>
     <surefire.timeout>900</surefire.timeout>
+    <surefire.reuseForks>false</surefire.reuseForks>
     <test.exclude.pattern/>
     <!--
       Use -Dsurefire.Xmx=xxg to run tests with different JVM Xmx value.
@@ -1957,7 +1958,7 @@
               The counter in HBaseTestAppender will be broken if we set reuseForks to true, be
               careful when you want to change this value. See HBASE-26947 for more details.
             -->
-            <reuseForks>false</reuseForks>
+            <reuseForks>${surefire.reuseForks}</reuseForks>
             <reportsDirectory>${surefire.reportsDirectory}</reportsDirectory>
             <tempDir>${surefire.tempDir}</tempDir>
             <testFailureIgnore>${surefire.testFailureIgnore}</testFailureIgnore>

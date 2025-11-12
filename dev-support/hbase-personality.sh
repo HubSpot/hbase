@@ -271,6 +271,10 @@ function personality_modules
       extra="${extra} -Dsurefire.secondPartForkCount=${SUREFIRE_SECOND_PART_FORK_COUNT}"
     fi
 
+    if [[ -n "${SUREFIRE_REUSE_FORKS}" ]]; then
+      extra="${extra} -Dsurefire.reuseForks=${SUREFIRE_REUSE_FORKS}"
+    fi
+
     # If the set of changed files includes CommonFSUtils then add the hbase-server
     # module to the set of modules (if not already included) to be tested
     for f in "${CHANGED_FILES[@]}"
