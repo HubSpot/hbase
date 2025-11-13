@@ -23,11 +23,12 @@ import static org.junit.Assert.assertTrue;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.apache.hadoop.hbase.HBaseClassTestRule;
 import org.apache.hadoop.hbase.nio.ByteBuff;
+import org.apache.hadoop.hbase.testclassification.MediumTests;
 import org.apache.hadoop.hbase.testclassification.RPCTests;
-import org.apache.hadoop.hbase.testclassification.SmallTests;
 import org.junit.ClassRule;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
+import org.junit.jupiter.api.parallel.Isolated;
 
 import org.apache.hbase.thirdparty.io.netty.util.ResourceLeakDetector;
 import org.apache.hbase.thirdparty.io.netty.util.internal.logging.InternalLogLevel;
@@ -35,7 +36,9 @@ import org.apache.hbase.thirdparty.io.netty.util.internal.logging.InternalLogger
 import org.apache.hbase.thirdparty.io.netty.util.internal.logging.InternalLoggerFactory;
 import org.apache.hbase.thirdparty.io.netty.util.internal.logging.Slf4JLoggerFactory;
 
-@Category({ RPCTests.class, SmallTests.class })
+// Use MediumTests because this test class needs its own JVM
+@Category({ RPCTests.class, MediumTests.class })
+@Isolated
 public class TestByteBuffAllocatorLeakDetection {
 
   @ClassRule

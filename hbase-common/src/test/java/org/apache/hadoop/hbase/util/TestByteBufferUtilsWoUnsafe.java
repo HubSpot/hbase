@@ -20,15 +20,16 @@ package org.apache.hadoop.hbase.util;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.mockito.Mockito.mockStatic;
 
+import org.apache.hadoop.hbase.testclassification.MediumTests;
 import org.apache.hadoop.hbase.testclassification.MiscTests;
-import org.apache.hadoop.hbase.testclassification.SmallTests;
 import org.apache.hadoop.hbase.unsafe.HBasePlatformDependent;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
 import org.mockito.MockedStatic;
 
 @Tag(MiscTests.TAG)
-@Tag(SmallTests.TAG)
+// Use MediumTests because this test class needs its own JVM
+@Tag(MediumTests.TAG)
 public class TestByteBufferUtilsWoUnsafe extends ByteBufferUtilsTestBase {
 
   @BeforeAll

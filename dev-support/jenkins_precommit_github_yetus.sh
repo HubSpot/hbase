@@ -151,9 +151,6 @@ fi
 if [[ -n "${SUREFIRE_SECOND_PART_FORK_COUNT}" ]]; then
   YETUS_ARGS+=("--surefire-second-part-fork-count=${SUREFIRE_SECOND_PART_FORK_COUNT}")
 fi
-if [[ -n "${SUREFIRE_REUSE_FORKS}" ]]; then
-  YETUS_ARGS+=("--surefire-reuse-forks=${SUREFIRE_REUSE_FORKS}")
-fi
 if [[ -n "${JAVA8_HOME}" ]]; then
   YETUS_ARGS+=("--java8-home=${JAVA8_HOME}")
 fi

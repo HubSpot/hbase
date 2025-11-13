@@ -20,12 +20,13 @@ package org.apache.hadoop.hbase.io;
 import org.apache.hadoop.hbase.CompatibilityFactory;
 import org.apache.hadoop.hbase.HBaseClassTestRule;
 import org.apache.hadoop.hbase.test.MetricsAssertHelper;
-import org.apache.hadoop.hbase.testclassification.SmallTests;
+import org.apache.hadoop.hbase.testclassification.MediumTests;
 import org.junit.ClassRule;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
 
-@Category(SmallTests.class)
+// Use MediumTests so this test class gets its own JVM, and doesn't pollute other tests with an extra metrics source
+@Category(MediumTests.class)
 public class TestMetricsIO {
 
   @ClassRule

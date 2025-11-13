@@ -1005,14 +1005,13 @@
       something like this:
          f="0.5C" ;  mvn -T$f -Dsurefire.firstPartForkCount=$f -Dsurefire.secondPartForkCount=$f test -PrunAllTests
     -->
-    <surefire.firstPartForkCount>0.25C</surefire.firstPartForkCount>
-    <surefire.secondPartForkCount>0.25C</surefire.secondPartForkCount>
+    <surefire.firstPartForkCount>1C</surefire.firstPartForkCount>
+    <surefire.secondPartForkCount>1C</surefire.secondPartForkCount>
     <surefire.firstPartGroups>org.apache.hadoop.hbase.testclassification.SmallTests</surefire.firstPartGroups>
     <surefire.secondPartGroups>org.apache.hadoop.hbase.testclassification.MediumTests</surefire.secondPartGroups>
     <surefire.testFailureIgnore>false</surefire.testFailureIgnore>
     <test.output.tofile>true</test.output.tofile>
     <surefire.timeout>900</surefire.timeout>
-    <surefire.reuseForks>false</surefire.reuseForks>
     <test.exclude.pattern/>
     <!--
       Use -Dsurefire.Xmx=xxg to run tests with different JVM Xmx value.
@@ -1958,7 +1957,7 @@
               The counter in HBaseTestAppender will be broken if we set reuseForks to true, be
               careful when you want to change this value. See HBASE-26947 for more details.
             -->
-            <reuseForks>${surefire.reuseForks}</reuseForks>
+            <reuseForks>true</reuseForks>
             <reportsDirectory>${surefire.reportsDirectory}</reportsDirectory>
             <tempDir>${surefire.tempDir}</tempDir>
             <testFailureIgnore>${surefire.testFailureIgnore}</testFailureIgnore>
@@ -2618,10 +2617,6 @@
                     <bannedImport>org.apache.log4j.**</bannedImport>
                     <bannedImport>org.apache.logging.log4j.**</bannedImport>
                   </bannedImports>
-                  <exclusions>
-                    <!-- Exclude this one as it is a log4j2 appender implementation -->
-                    <exclusion>org.apache.hadoop.hbase.logging.HBaseTestAppender</exclusion>
-                  </exclusions>
                 </restrictImports>
                 <restrictImports implementation="de.skuzzle.enforcer.restrictimports.rule.RestrictImports">
                   <includeTestCode>false</includeTestCode>

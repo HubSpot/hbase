@@ -22,14 +22,15 @@ import static org.junit.Assert.assertTrue;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.HBaseClassTestRule;
+import org.apache.hadoop.hbase.testclassification.MediumTests;
 import org.apache.hadoop.hbase.testclassification.RegionServerTests;
-import org.apache.hadoop.hbase.testclassification.SmallTests;
 import org.junit.Before;
 import org.junit.ClassRule;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
 
-@Category({ RegionServerTests.class, SmallTests.class })
+// Use MediumTests because this test class needs its own JVM
+@Category({ RegionServerTests.class, MediumTests.class })
 public class TestMetricsTableMetricsMap {
 
   @ClassRule
