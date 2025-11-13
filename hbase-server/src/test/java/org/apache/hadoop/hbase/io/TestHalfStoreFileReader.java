@@ -60,7 +60,7 @@ import org.apache.hadoop.hbase.regionserver.StoreFileWriter;
 import org.apache.hadoop.hbase.regionserver.storefiletracker.StoreFileTracker;
 import org.apache.hadoop.hbase.regionserver.storefiletracker.StoreFileTrackerFactory;
 import org.apache.hadoop.hbase.testclassification.IOTests;
-import org.apache.hadoop.hbase.testclassification.SmallTests;
+import org.apache.hadoop.hbase.testclassification.MediumTests;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
@@ -70,7 +70,8 @@ import org.junit.experimental.categories.Category;
 
 import org.apache.hbase.thirdparty.io.netty.util.ResourceLeakDetector;
 
-@Category({ IOTests.class, SmallTests.class })
+// Use MediumTests because this test class needs its own JVM
+@Category({ IOTests.class, MediumTests.class })
 public class TestHalfStoreFileReader {
 
   @ClassRule

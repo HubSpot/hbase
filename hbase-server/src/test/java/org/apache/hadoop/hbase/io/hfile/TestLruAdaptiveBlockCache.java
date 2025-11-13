@@ -41,7 +41,7 @@ import org.apache.hadoop.hbase.io.HeapSize;
 import org.apache.hadoop.hbase.io.hfile.LruAdaptiveBlockCache.EvictionThread;
 import org.apache.hadoop.hbase.nio.ByteBuff;
 import org.apache.hadoop.hbase.testclassification.IOTests;
-import org.apache.hadoop.hbase.testclassification.SmallTests;
+import org.apache.hadoop.hbase.testclassification.MediumTests;
 import org.apache.hadoop.hbase.util.ClassSize;
 import org.junit.Assert;
 import org.junit.ClassRule;
@@ -54,9 +54,10 @@ import org.slf4j.LoggerFactory;
  * Tests the concurrent LruAdaptiveBlockCache.
  * <p>
  * Tests will ensure it grows and shrinks in size properly, evictions run when they're supposed to
- * and do what they should, and that cached blocks are accessible when expected to be.
+ * and do what they should, and that cached blocks are accessible when expected to be. Use
+ * MediumTests because this test class needs its own JVM
  */
-@Category({ IOTests.class, SmallTests.class })
+@Category({ IOTests.class, MediumTests.class })
 public class TestLruAdaptiveBlockCache {
 
   @ClassRule

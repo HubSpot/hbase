@@ -39,8 +39,8 @@ import org.apache.hadoop.hbase.replication.ReplicationPeerConfigBuilder;
 import org.apache.hadoop.hbase.replication.ReplicationQueueId;
 import org.apache.hadoop.hbase.replication.ReplicationQueueStorage;
 import org.apache.hadoop.hbase.replication.ReplicationStorageFactory;
+import org.apache.hadoop.hbase.testclassification.MediumTests;
 import org.apache.hadoop.hbase.testclassification.ReplicationTests;
-import org.apache.hadoop.hbase.testclassification.SmallTests;
 import org.apache.hadoop.hbase.util.CommonFSUtils;
 import org.apache.hadoop.hbase.util.Pair;
 import org.junit.After;
@@ -52,9 +52,9 @@ import org.junit.experimental.categories.Category;
 import org.junit.rules.TestName;
 
 /**
- * Tests for DumpReplicationQueues tool
+ * Tests for DumpReplicationQueues tool Use MediumTests because this test class needs its own JVM
  */
-@Category({ ReplicationTests.class, SmallTests.class })
+@Category({ ReplicationTests.class, MediumTests.class })
 public class TestDumpReplicationQueues {
 
   @ClassRule

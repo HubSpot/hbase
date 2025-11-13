@@ -33,7 +33,7 @@ import org.apache.hadoop.hbase.security.access.SecureTestUtil;
 import org.apache.hadoop.hbase.security.access.SecureTestUtil.AccessTestAction;
 import org.apache.hadoop.hbase.security.access.UserPermission;
 import org.apache.hadoop.hbase.testclassification.ClientTests;
-import org.apache.hadoop.hbase.testclassification.SmallTests;
+import org.apache.hadoop.hbase.testclassification.MediumTests;
 import org.junit.BeforeClass;
 import org.junit.ClassRule;
 import org.junit.Test;
@@ -44,7 +44,8 @@ import org.junit.runners.Parameterized;
 import org.apache.hbase.thirdparty.com.google.common.collect.Lists;
 
 @RunWith(Parameterized.class)
-@Category({ ClientTests.class, SmallTests.class })
+// Use MediumTests because this test class needs its own JVM
+@Category({ ClientTests.class, MediumTests.class })
 public class TestAsyncAccessControlAdminApi extends TestAsyncAdminBase {
 
   @ClassRule

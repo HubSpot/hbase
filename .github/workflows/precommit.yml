@@ -37,6 +37,7 @@ env:
   TESTS_FILTER: 'checkstyle,javac,javadoc,pylint,shellcheck,shelldocs,blanks,perlcritic,ruby-lint,rubocop'
   SUREFIRE_FIRST_PART_FORK_COUNT: '1C'
   SUREFIRE_SECOND_PART_FORK_COUNT: '1C'
+  BUILD_THREAD: '4'
   ASF_NIGHTLIES: 'https://nightlies.apache.org'
   EXCLUDE_TESTS_URL: 'https://ci-hbase.apache.org/job/HBase-Find-Flaky-Tests/job/${{ github.base_ref }}/lastSuccessfulBuild/artifact/output/excludes'
   BUILD_URL_ARTIFACTS: '${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}'
@@ -44,7 +45,6 @@ env:
 jobs:
   precommit-checks:
     runs-on: ubuntu-latest
-    timeout-minutes: 600
     continue-on-error: true
     strategy:
       fail-fast: false
@@ -78,7 +78,7 @@ jobs:
           echo "SOURCEDIR=${WORKDIR}/${SRC_REL}" >> $GITHUB_ENV
           echo "PATCHDIR=${WORKDIR}/${PATCH_REL}" >> $GITHUB_ENV
           echo "DOCKERFILE=${WORKDIR}/${SRC_REL}/dev-support/docker/Dockerfile" >> $GITHUB_ENV
-          echo "YETUSDIR=${WORKDIR}/yetus" >> $GITHUB_ENV
+          echo "YETUSDIR=${WORKDIR}/${YETUS_REL}" >> $GITHUB_ENV
           echo "CACHE_APACHE_ARTIFACT=${WORKDIR}/${SRC_REL}/dev-support/jenkins-scripts/cache-apache-project-artifact.sh" >> $GITHUB_ENV
           echo "YETUS_DRIVER=${WORKDIR}/${SRC_REL}/dev-support/jenkins_precommit_github_yetus.sh" >> $GITHUB_ENV
           echo "HIDE_OLD_COMMENTS=${WORKDIR}/${SRC_REL}/dev-support/gh_hide_old_comments.sh" >> $GITHUB_ENV
@@ -108,6 +108,7 @@ jobs:
       - name: Run Yetus test-patch
         id: test-patch
         continue-on-error: true
+        timeout-minutes: 300
         working-directory: ${{ env.WORKDIR }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

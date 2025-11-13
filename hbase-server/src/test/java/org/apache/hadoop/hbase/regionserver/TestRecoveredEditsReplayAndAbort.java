@@ -33,8 +33,8 @@ import org.apache.hadoop.hbase.client.RegionInfoBuilder;
 import org.apache.hadoop.hbase.client.TableDescriptor;
 import org.apache.hadoop.hbase.client.TableDescriptorBuilder;
 import org.apache.hadoop.hbase.monitoring.TaskMonitor;
+import org.apache.hadoop.hbase.testclassification.MediumTests;
 import org.apache.hadoop.hbase.testclassification.RegionServerTests;
-import org.apache.hadoop.hbase.testclassification.SmallTests;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.CancelableProgressable;
 import org.apache.hadoop.hbase.util.CommonFSUtils;
@@ -59,9 +59,9 @@ import org.slf4j.LoggerFactory;
 
 /**
  * HBASE-21031 If replay edits fails, we need to make sure memstore is rollbacked And if MSLAB is
- * used, all chunk is released too.
+ * used, all chunk is released too. Use MediumTests because this test class needs its own JVM
  */
-@Category({ RegionServerTests.class, SmallTests.class })
+@Category({ RegionServerTests.class, MediumTests.class })
 public class TestRecoveredEditsReplayAndAbort {
   @ClassRule
   public static final HBaseClassTestRule CLASS_RULE =

@@ -64,8 +64,8 @@ import org.apache.hadoop.hbase.io.hfile.HFileContextBuilder;
 import org.apache.hadoop.hbase.io.hfile.bucket.BucketCache;
 import org.apache.hadoop.hbase.regionserver.storefiletracker.StoreFileTracker;
 import org.apache.hadoop.hbase.regionserver.storefiletracker.StoreFileTrackerFactory;
+import org.apache.hadoop.hbase.testclassification.MediumTests;
 import org.apache.hadoop.hbase.testclassification.RegionServerTests;
-import org.apache.hadoop.hbase.testclassification.SmallTests;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.CommonFSUtils;
 import org.apache.hadoop.hbase.util.Pair;
@@ -93,9 +93,11 @@ import org.slf4j.LoggerFactory;
  * | hStoreFile2      | region2            | hStore21            | TIME_RANGE            | true  |
  * | hStoreFile3      | region2            | hStore22            | TIME_RANGE            | false |
  * @formatter:on
+ *
+ * Use MediumTests because this test class needs its own JVM
  */
 
-@Category({ RegionServerTests.class, SmallTests.class })
+@Category({ RegionServerTests.class, MediumTests.class })
 public class TestDataTieringManager {
 
   @ClassRule

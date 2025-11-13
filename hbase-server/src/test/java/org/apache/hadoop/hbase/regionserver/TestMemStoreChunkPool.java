@@ -37,8 +37,8 @@ import org.apache.hadoop.hbase.KeyValue;
 import org.apache.hadoop.hbase.exceptions.UnexpectedStateException;
 import org.apache.hadoop.hbase.io.util.MemorySizeUtil;
 import org.apache.hadoop.hbase.regionserver.ChunkCreator.ChunkType;
+import org.apache.hadoop.hbase.testclassification.MediumTests;
 import org.apache.hadoop.hbase.testclassification.RegionServerTests;
-import org.apache.hadoop.hbase.testclassification.SmallTests;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.junit.After;
 import org.junit.AfterClass;
@@ -48,9 +48,10 @@ import org.junit.Test;
 import org.junit.experimental.categories.Category;
 
 /**
- * Test the {@link org.apache.hadoop.hbase.regionserver.ChunkCreator.MemStoreChunkPool} class
+ * Test the {@link org.apache.hadoop.hbase.regionserver.ChunkCreator.MemStoreChunkPool} class Use
+ * MediumTests because this test class needs its own JVM
  */
-@Category({ RegionServerTests.class, SmallTests.class })
+@Category({ RegionServerTests.class, MediumTests.class })
 public class TestMemStoreChunkPool {
 
   @ClassRule

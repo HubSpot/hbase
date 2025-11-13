@@ -44,7 +44,7 @@ import org.apache.hadoop.hbase.io.hfile.BlockCacheKey;
 import org.apache.hadoop.hbase.io.hfile.CacheConfig;
 import org.apache.hadoop.hbase.io.hfile.CacheTestUtils;
 import org.apache.hadoop.hbase.io.hfile.Cacheable;
-import org.apache.hadoop.hbase.testclassification.SmallTests;
+import org.apache.hadoop.hbase.testclassification.MediumTests;
 import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
 import org.apache.hadoop.hbase.util.Pair;
 import org.junit.ClassRule;
@@ -54,10 +54,11 @@ import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 
 /**
- * Basic test for check file's integrity before start BucketCache in fileIOEngine
+ * Basic test for check file's integrity before start BucketCache in fileIOEngine Use MediumTests
+ * because this test class needs its own JVM
  */
 @RunWith(Parameterized.class)
-@Category(SmallTests.class)
+@Category(MediumTests.class)
 public class TestVerifyBucketCacheFile {
   @ClassRule
   public static final HBaseClassTestRule CLASS_RULE =

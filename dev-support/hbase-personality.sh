@@ -168,6 +168,8 @@ function personality_modules
   # https://cwiki.apache.org/confluence/display/MAVEN/Parallel+builds+in+Maven+3
   if [[ "${testtype}" == mvnsite ]]; then
     yetus_debug "Skip specifying --threads since maven-site-plugin does not support building in parallel."
+  elif [[ "${testtype}" == unit ]]; then
+    yetus_debug "Skip specifying --threads since unit tests are parallelized via surefire test runner."
   else
     if [[ -n "${BUILD_THREAD}" ]]; then
       extra="--threads=${BUILD_THREAD}"

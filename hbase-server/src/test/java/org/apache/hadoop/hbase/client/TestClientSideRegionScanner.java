@@ -47,7 +47,7 @@ import org.apache.hadoop.hbase.io.hfile.IndexOnlyLruBlockCache;
 import org.apache.hadoop.hbase.regionserver.RegionScanner;
 import org.apache.hadoop.hbase.regionserver.StoreScanner;
 import org.apache.hadoop.hbase.testclassification.ClientTests;
-import org.apache.hadoop.hbase.testclassification.SmallTests;
+import org.apache.hadoop.hbase.testclassification.MediumTests;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.junit.AfterClass;
 import org.junit.Assert;
@@ -57,7 +57,8 @@ import org.junit.ClassRule;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
 
-@Category({ SmallTests.class, ClientTests.class })
+// Use MediumTests because this test class needs its own JVM
+@Category({ MediumTests.class, ClientTests.class })
 public class TestClientSideRegionScanner {
   @ClassRule
   public static final HBaseClassTestRule CLASS_RULE =

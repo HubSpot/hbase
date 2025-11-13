@@ -29,8 +29,8 @@ import org.apache.hadoop.hbase.HBaseTestingUtil;
 import org.apache.hadoop.hbase.ipc.RpcServer;
 import org.apache.hadoop.hbase.ipc.RpcServer.BlockingServiceAndInterface;
 import org.apache.hadoop.hbase.ipc.RpcServerInterface;
+import org.apache.hadoop.hbase.testclassification.MediumTests;
 import org.apache.hadoop.hbase.testclassification.SecurityTests;
-import org.apache.hadoop.hbase.testclassification.SmallTests;
 import org.apache.hadoop.security.authorize.Service;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
@@ -40,9 +40,10 @@ import org.junit.experimental.categories.Category;
 
 /**
  * Make sure that all rpc services for master and region server are properly configured in
- * {@link SecurityInfo} and {@link HBasePolicyProvider}.
+ * {@link SecurityInfo} and {@link HBasePolicyProvider}. Use MediumTests because this test class
+ * needs its own JVM
  */
-@Category({ SecurityTests.class, SmallTests.class })
+@Category({ SecurityTests.class, MediumTests.class })
 public class TestSecurityInfoAndHBasePolicyProviderMatch {
 
   @ClassRule
