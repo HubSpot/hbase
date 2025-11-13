@@ -37,8 +37,9 @@ env:
   TESTS_FILTER: 'checkstyle,javac,javadoc,pylint,shellcheck,shelldocs,blanks,perlcritic,ruby-lint,rubocop'
   SUREFIRE_FIRST_PART_FORK_COUNT: '1C'
   SUREFIRE_SECOND_PART_FORK_COUNT: '1C'
-  SUREFIRE_REUSE_FORKS: 'true'
   ASF_NIGHTLIES: 'https://nightlies.apache.org'
+  EXCLUDE_TESTS_URL: 'https://ci-hbase.apache.org/job/HBase-Find-Flaky-Tests/job/${{ github.base_ref }}/lastSuccessfulBuild/artifact/output/excludes'
+  BUILD_URL_ARTIFACTS: '${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}'
 
 jobs:
   precommit-checks:
@@ -72,32 +73,26 @@ jobs:
       - name: Setup environment paths
         id: setup-env
         run: |
-          WORKDIR="${GITHUB_WORKSPACE}/${{ matrix.workdir }}"
-          echo "WORKDIR=${WORKDIR}" >> $GITHUB_ENV
-          echo "YETUSDIR=${WORKDIR}/${YETUS_REL}" >> $GITHUB_ENV
+          WORKDIR="${{ github.workspace }}/${{ matrix.workdir }}"
+
           echo "SOURCEDIR=${WORKDIR}/${SRC_REL}" >> $GITHUB_ENV
           echo "PATCHDIR=${WORKDIR}/${PATCH_REL}" >> $GITHUB_ENV
           echo "DOCKERFILE=${WORKDIR}/${SRC_REL}/dev-support/docker/Dockerfile" >> $GITHUB_ENV
+          echo "YETUSDIR=${WORKDIR}/yetus" >> $GITHUB_ENV
           echo "CACHE_APACHE_ARTIFACT=${WORKDIR}/${SRC_REL}/dev-support/jenkins-scripts/cache-apache-project-artifact.sh" >> $GITHUB_ENV
           echo "YETUS_DRIVER=${WORKDIR}/${SRC_REL}/dev-support/jenkins_precommit_github_yetus.sh" >> $GITHUB_ENV
           echo "HIDE_OLD_COMMENTS=${WORKDIR}/${SRC_REL}/dev-support/gh_hide_old_comments.sh" >> $GITHUB_ENV
           echo "ASF_NIGHTLIES_CHECK_BASE=${ASF_NIGHTLIES}/hbase/${{ github.repository }}/${{ github.run_id }}/${{ matrix.workdir }}/${PATCH_REL}" >> $GITHUB_ENV
-          echo "JENKINS_URL=https://ci-hbase.apache.org" >> $GITHUB_ENV
-          echo "EXCLUDE_TESTS_URL=${JENKINS_URL}/job/HBase-Find-Flaky-Tests/job/${{ github.base_ref }}/lastSuccessfulBuild/artifact/output/excludes"
-
-          # Set matrix-specific environment variables
           echo "PLUGINS=${{ matrix.plugins }}" >> $GITHUB_ENV
           echo "SET_JAVA_HOME=${{ matrix.java-home }}" >> $GITHUB_ENV
           echo "HADOOP_PROFILE=${{ matrix.hadoop-profile }}" >> $GITHUB_ENV
-          echo "WORKDIR_REL=${{ matrix.workdir }}" >> $GITHUB_ENV
+          echo "WORKDIR_REL=${WORKDIR}" >> $GITHUB_ENV
           echo "SKIP_ERRORPRONE=${{ matrix.skip-errorprone }}" >> $GITHUB_ENV
-          echo "BUILD_URL_ARTIFACTS=${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" >> $GITHUB_ENV
 
-          # Create working directories
           mkdir -p "${WORKDIR}"
           mkdir -p "${WORKDIR}/${SRC_REL}"
-          mkdir -p "${WORKDIR}/${YETUS_REL}"
           mkdir -p "${WORKDIR}/${PATCH_REL}"
+          mkdir -p "${WORKDIR}/${YETUS_REL}"
 
       - name: Download and extract Apache Yetus
         working-directory: ${{ env.YETUSDIR }}
