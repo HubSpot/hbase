@@ -82,6 +82,8 @@ jobs:
           echo "YETUS_DRIVER=${WORKDIR}/${SRC_REL}/dev-support/jenkins_precommit_github_yetus.sh" >> $GITHUB_ENV
           echo "HIDE_OLD_COMMENTS=${WORKDIR}/${SRC_REL}/dev-support/gh_hide_old_comments.sh" >> $GITHUB_ENV
           echo "ASF_NIGHTLIES_CHECK_BASE=${ASF_NIGHTLIES}/hbase/${{ github.repository }}/${{ github.run_id }}/${{ matrix.workdir }}/${PATCH_REL}" >> $GITHUB_ENV
+          echo "JENKINS_URL=https://ci-hbase.apache.org" >> $GITHUB_ENV
+          echo "EXCLUDE_TESTS_URL=${JENKINS_URL}/job/HBase-Find-Flaky-Tests/job/${{ github.base_ref }}/lastSuccessfulBuild/artifact/output/excludes"
 
           # Set matrix-specific environment variables
           echo "PLUGINS=${{ matrix.plugins }}" >> $GITHUB_ENV
