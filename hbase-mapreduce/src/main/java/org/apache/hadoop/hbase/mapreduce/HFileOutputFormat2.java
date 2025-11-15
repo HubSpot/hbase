@@ -21,6 +21,7 @@ import static org.apache.hadoop.hbase.regionserver.HStoreFile.BULKLOAD_TASK_KEY;
 import static org.apache.hadoop.hbase.regionserver.HStoreFile.BULKLOAD_TIME_KEY;
 import static org.apache.hadoop.hbase.regionserver.HStoreFile.EXCLUDE_FROM_MINOR_COMPACTION_KEY;
 import static org.apache.hadoop.hbase.regionserver.HStoreFile.MAJOR_COMPACTION_KEY;
+import static org.apache.hadoop.hbase.regionserver.HStoreFile.MAX_SEQ_ID_KEY;
 import static org.apache.hadoop.hbase.regionserver.HStoreFile.SKIP_RESET_SEQ_ID;
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
@@ -210,6 +211,7 @@ public class HFileOutputFormat2 extends FileOutputFormat<ImmutableBytesWritable,
     REMOTE_CLUSTER_CONF_PREFIX + HConstants.ZOOKEEPER_ZNODE_PARENT;
 
   public static final String SKIP_RESET_SEQ_ID_KEY = "hbase.hfileoutputformat.skip.reset.seq.id";
+  public static final String SET_MAX_SEQ_ID_KEY = "hbase.hfileoutputformat.set.max.seq.id";
 
   public static final String STORAGE_POLICY_PROPERTY = HStore.BLOCK_STORAGE_POLICY_KEY;
   public static final String STORAGE_POLICY_PROPERTY_CF_PREFIX = STORAGE_POLICY_PROPERTY + ".";
@@ -272,7 +274,7 @@ public class HFileOutputFormat2 extends FileOutputFormat<ImmutableBytesWritable,
 
     return new RecordWriter<ImmutableBytesWritable, V>() {
       // Map of families to writers and how much has been output on the writer.
-      private final Map<byte[], WriterLength> writers = new TreeMap<>(Bytes.BYTES_COMPARATOR);
+      private final Map<byte[], WriterInfo> writers = new TreeMap<>(Bytes.BYTES_COMPARATOR);
       private final Map<byte[], byte[]> previousRows = new TreeMap<>(Bytes.BYTES_COMPARATOR);
       private final long now = EnvironmentEdgeManager.currentTime();
       private byte[] tableNameBytes = writeMultipleTables ? null : Bytes.toBytes(writeTableNames);
@@ -302,10 +304,10 @@ public class HFileOutputFormat2 extends FileOutputFormat<ImmutableBytesWritable,
         }
         byte[] tableAndFamily = getTableNameSuffixedWithFamily(tableNameBytes, family);
 
-        WriterLength wl = this.writers.get(tableAndFamily);
+        WriterInfo wi = this.writers.get(tableAndFamily);
 
         // If this is a new column family, verify that the directory exists
-        if (wl == null) {
+        if (wi == null) {
           Path writerPath = null;
           if (writeMultipleTables) {
             Path tableRelPath = getTableRelativePath(tableNameBytes);
@@ -319,14 +321,14 @@ public class HFileOutputFormat2 extends FileOutputFormat<ImmutableBytesWritable,
 
         // This can only happen once a row is finished though
         if (
-          wl != null && wl.written + length >= maxsize
+          wi != null && wi.written + length >= maxsize
             && Bytes.compareTo(this.previousRows.get(family), rowKey) != 0
         ) {
-          rollWriters(wl);
+          rollWriters(wi);
         }
 
         // create a new WAL writer, if necessary
-        if (wl == null || wl.writer == null) {
+        if (wi == null || wi.writer == null) {
           InetSocketAddress[] favoredNodes = null;
           if (conf.getBoolean(LOCALITY_SENSITIVE_CONF_KEY, DEFAULT_LOCALITY_SENSITIVE)) {
             HRegionLocation loc = null;
@@ -357,14 +359,15 @@ public class HFileOutputFormat2 extends FileOutputFormat<ImmutableBytesWritable,
               }
             }
           }
-          wl = getNewWriter(tableNameBytes, family, conf, favoredNodes);
+          wi = getNewWriter(tableNameBytes, family, conf, favoredNodes);
 
         }
 
         // we now have the proper WAL writer. full steam ahead
         PrivateCellUtil.updateLatestStamp(cell, this.now);
-        wl.writer.append(kv);
-        wl.written += length;
+        wi.writer.append(kv);
+        wi.written += length;
+        wi.maxSequenceId = Math.max(kv.getSequenceId(), wi.maxSequenceId);
 
         // Copy the row so we know when a row transition.
         this.previousRows.put(family, rowKey);
@@ -380,24 +383,24 @@ public class HFileOutputFormat2 extends FileOutputFormat<ImmutableBytesWritable,
         return tableRelPath;
       }
 
-      private void rollWriters(WriterLength writerLength) throws IOException {
-        if (writerLength != null) {
-          closeWriter(writerLength);
+      private void rollWriters(WriterInfo writerInfo) throws IOException {
+        if (writerInfo != null) {
+          closeWriter(writerInfo);
         } else {
-          for (WriterLength wl : this.writers.values()) {
+          for (WriterInfo wl : this.writers.values()) {
             closeWriter(wl);
           }
         }
       }
 
-      private void closeWriter(WriterLength wl) throws IOException {
-        if (wl.writer != null) {
+      private void closeWriter(WriterInfo wi) throws IOException {
+        if (wi.writer != null) {
           LOG.info(
-            "Writer=" + wl.writer.getPath() + ((wl.written == 0) ? "" : ", wrote=" + wl.written));
-          close(wl.writer);
-          wl.writer = null;
+            "Writer=" + wi.writer.getPath() + ((wi.written == 0) ? "" : ", wrote=" + wi.written));
+          close(wi.writer, wi);
+          wi.writer = null;
         }
-        wl.written = 0;
+        wi.written = 0;
       }
 
       private Configuration createRemoteClusterConf(Configuration conf) {
@@ -437,11 +440,11 @@ public class HFileOutputFormat2 extends FileOutputFormat<ImmutableBytesWritable,
 
       /*
        * Create a new StoreFile.Writer.
-       * @return A WriterLength, containing a new StoreFile.Writer.
+       * @return A WriterInfo, containing a new StoreFile.Writer.
        */
       @edu.umd.cs.findbugs.annotations.SuppressWarnings(value = "BX_UNBOXING_IMMEDIATELY_REBOXED",
           justification = "Not important")
-      private WriterLength getNewWriter(byte[] tableName, byte[] family, Configuration conf,
+      private WriterInfo getNewWriter(byte[] tableName, byte[] family, Configuration conf,
         InetSocketAddress[] favoredNodes) throws IOException {
         byte[] tableAndFamily = getTableNameSuffixedWithFamily(tableName, family);
         Path familydir = new Path(outputDir, Bytes.toString(family));
@@ -449,7 +452,7 @@ public class HFileOutputFormat2 extends FileOutputFormat<ImmutableBytesWritable,
           familydir =
             new Path(outputDir, new Path(getTableRelativePath(tableName), Bytes.toString(family)));
         }
-        WriterLength wl = new WriterLength();
+        WriterInfo wi = new WriterInfo();
         Algorithm compression = overriddenCompression;
         compression = compression == null ? compressionMap.get(tableAndFamily) : compression;
         compression = compression == null ? defaultCompression : compression;
@@ -476,25 +479,28 @@ public class HFileOutputFormat2 extends FileOutputFormat<ImmutableBytesWritable,
 
         HFileContext hFileContext = contextBuilder.build();
         if (null == favoredNodes) {
-          wl.writer =
+          wi.writer =
             new StoreFileWriter.Builder(conf, CacheConfig.DISABLED, fs).withOutputDir(familydir)
               .withBloomType(bloomType).withFileContext(hFileContext).build();
         } else {
-          wl.writer = new StoreFileWriter.Builder(conf, CacheConfig.DISABLED, new HFileSystem(fs))
+          wi.writer = new StoreFileWriter.Builder(conf, CacheConfig.DISABLED, new HFileSystem(fs))
             .withOutputDir(familydir).withBloomType(bloomType).withFileContext(hFileContext)
             .withFavoredNodes(favoredNodes).build();
         }
 
-        this.writers.put(tableAndFamily, wl);
-        return wl;
+        this.writers.put(tableAndFamily, wi);
+        return wi;
       }
 
-      private void close(final StoreFileWriter w) throws IOException {
+      private void close(final StoreFileWriter w, final WriterInfo wl) throws IOException {
         if (w != null) {
           w.appendFileInfo(BULKLOAD_TIME_KEY, Bytes.toBytes(EnvironmentEdgeManager.currentTime()));
           w.appendFileInfo(BULKLOAD_TASK_KEY, Bytes.toBytes(context.getTaskAttemptID().toString()));
           if (conf.getBoolean(SKIP_RESET_SEQ_ID_KEY, false)) {
             w.appendFileInfo(SKIP_RESET_SEQ_ID, Bytes.toBytes(true));
+          }
+          if (conf.getBoolean(SET_MAX_SEQ_ID_KEY, false) && wl.maxSequenceId >= 0) {
+            w.appendFileInfo(MAX_SEQ_ID_KEY, Bytes.toBytes(wl.maxSequenceId));
           }
           w.appendFileInfo(MAJOR_COMPACTION_KEY, Bytes.toBytes(true));
           w.appendFileInfo(EXCLUDE_FROM_MINOR_COMPACTION_KEY, Bytes.toBytes(compactionExclude));
@@ -505,8 +511,8 @@ public class HFileOutputFormat2 extends FileOutputFormat<ImmutableBytesWritable,
 
       @Override
       public void close(TaskAttemptContext c) throws IOException, InterruptedException {
-        for (WriterLength wl : this.writers.values()) {
-          close(wl.writer);
+        for (WriterInfo wi : this.writers.values()) {
+          close(wi.writer, wi);
         }
       }
     };
@@ -529,8 +535,9 @@ public class HFileOutputFormat2 extends FileOutputFormat<ImmutableBytesWritable,
   /*
    * Data structure to hold a Writer and amount of data written on it.
    */
-  static class WriterLength {
+  static class WriterInfo {
     long written = 0;
+    long maxSequenceId = -1;
     StoreFileWriter writer = null;
   }
 
