@@ -18,7 +18,6 @@
 package org.apache.hadoop.hbase.backup.impl;
 
 import static org.apache.hadoop.hbase.backup.BackupRestoreConstants.JOB_NAME_CONF_KEY;
-
 import java.io.IOException;
 import java.net.URI;
 import java.net.URISyntaxException;
@@ -60,9 +59,7 @@ import org.apache.hadoop.util.Tool;
 import org.apache.yetus.audience.InterfaceAudience;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
 import org.apache.hbase.thirdparty.com.google.common.collect.Lists;
-
 import org.apache.hadoop.hbase.shaded.protobuf.generated.SnapshotProtos;
 
 /**
@@ -432,6 +429,7 @@ public class IncrementalTableBackupClient extends TableBackupClient {
     conf.setBoolean(HFileOutputFormat2.TABLE_NAME_WITH_NAMESPACE_INCLUSIVE_KEY, true);
     conf.setBoolean(WALPlayer.MULTI_TABLES_SUPPORT, true);
     conf.setBoolean(HFileOutputFormat2.DISK_BASED_SORTING_ENABLED_KEY, true);
+    conf.setBoolean(HFileOutputFormat2.SKIP_RESET_SEQ_ID_KEY, true);
     conf.set(JOB_NAME_CONF_KEY, jobname);
 
     // Rack-aware WAL processing configuration is set directly via command line to the same key
