@@ -21,7 +21,7 @@ import static org.apache.hadoop.hbase.regionserver.HStoreFile.BULKLOAD_TASK_KEY;
 import static org.apache.hadoop.hbase.regionserver.HStoreFile.BULKLOAD_TIME_KEY;
 import static org.apache.hadoop.hbase.regionserver.HStoreFile.EXCLUDE_FROM_MINOR_COMPACTION_KEY;
 import static org.apache.hadoop.hbase.regionserver.HStoreFile.MAJOR_COMPACTION_KEY;
-
+import static org.apache.hadoop.hbase.regionserver.HStoreFile.SKIP_RESET_SEQ_ID;
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
 import java.net.InetSocketAddress;
@@ -208,6 +208,8 @@ public class HFileOutputFormat2 extends FileOutputFormat<ImmutableBytesWritable,
     REMOTE_CLUSTER_CONF_PREFIX + "zookeeper." + HConstants.CLIENT_PORT_STR;
   public static final String REMOTE_CLUSTER_ZOOKEEPER_ZNODE_PARENT_CONF_KEY =
     REMOTE_CLUSTER_CONF_PREFIX + HConstants.ZOOKEEPER_ZNODE_PARENT;
+
+  public static final String SKIP_RESET_SEQ_ID_KEY = "hbase.hfileoutputformat.skip.reset.seq.id";
 
   public static final String STORAGE_POLICY_PROPERTY = HStore.BLOCK_STORAGE_POLICY_KEY;
   public static final String STORAGE_POLICY_PROPERTY_CF_PREFIX = STORAGE_POLICY_PROPERTY + ".";
@@ -491,6 +493,9 @@ public class HFileOutputFormat2 extends FileOutputFormat<ImmutableBytesWritable,
         if (w != null) {
           w.appendFileInfo(BULKLOAD_TIME_KEY, Bytes.toBytes(EnvironmentEdgeManager.currentTime()));
           w.appendFileInfo(BULKLOAD_TASK_KEY, Bytes.toBytes(context.getTaskAttemptID().toString()));
+          if (conf.getBoolean(SKIP_RESET_SEQ_ID_KEY, false)) {
+            w.appendFileInfo(SKIP_RESET_SEQ_ID, Bytes.toBytes(true));
+          }
           w.appendFileInfo(MAJOR_COMPACTION_KEY, Bytes.toBytes(true));
           w.appendFileInfo(EXCLUDE_FROM_MINOR_COMPACTION_KEY, Bytes.toBytes(compactionExclude));
           w.appendTrackedTimestampsToMetadata();
