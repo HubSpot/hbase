@@ -45,11 +45,15 @@ import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.KeyValue;
 import org.apache.hadoop.hbase.MiniHBaseCluster;
 import org.apache.hadoop.hbase.TableName;
+import org.apache.hadoop.hbase.client.ClientSideRegionScanner;
 import org.apache.hadoop.hbase.client.Delete;
 import org.apache.hadoop.hbase.client.Get;
 import org.apache.hadoop.hbase.client.Put;
+import org.apache.hadoop.hbase.client.RegionInfo;
 import org.apache.hadoop.hbase.client.Result;
+import org.apache.hadoop.hbase.client.Scan;
 import org.apache.hadoop.hbase.client.Table;
+import org.apache.hadoop.hbase.client.TableDescriptor;
 import org.apache.hadoop.hbase.io.ImmutableBytesWritable;
 import org.apache.hadoop.hbase.mapreduce.WALPlayer.WALKeyValueMapper;
 import org.apache.hadoop.hbase.regionserver.TestRecoveredEdits;
@@ -260,6 +264,97 @@ public class TestWALPlayer {
 
       assertThat(result.listCells(), notNullValue());
       assertThat(Bytes.toStringBinary(value), equalTo(Bytes.toStringBinary(finalLastVal)));
+
+      // cleanup
+      Path out = new Path(outPath);
+      FileSystem fs = out.getFileSystem(configuration);
+      assertTrue(fs.delete(out, true));
+    });
+  }
+
+  /**
+   * Tests that the sequence IDs of cells are retained in the resulting HFile and usable by a
+   * RegionScanner.
+   */
+  @Test
+  public void testWALPlayerSeqIDsCanBeScanned() throws Exception {
+    final TableName tableName = TableName.valueOf(name.getMethodName() + "1");
+    final byte[] family = Bytes.toBytes("family");
+    final byte[] column = Bytes.toBytes("c1");
+    final byte[] row = Bytes.toBytes("row");
+    final Table table = TEST_UTIL.createTable(tableName, family);
+
+    long now = EnvironmentEdgeManager.currentTime();
+    {
+      Put put = new Put(row);
+      put.addColumn(family, column, now, column);
+
+      table.put(put);
+    }
+
+    byte[] lastVal = null;
+    for (int i = 0; i < 50; i++) {
+      lastVal = new byte[ThreadLocalRandom.current().nextInt(10, 100)];
+      ThreadLocalRandom.current().nextBytes(lastVal);
+
+      Put put = new Put(row);
+      put.addColumn(family, column, now, lastVal);
+
+      table.put(put);
+
+      // wal rolling is necessary to trigger the bug. otherwise no sorting
+      // needs to occur in the reducer because it's all sorted and coming from a single file.
+      if (i % 10 == 0) {
+        WAL log = cluster.getRegionServer(0).getWAL(null);
+        log.rollWriter();
+      }
+    }
+
+    WAL log = cluster.getRegionServer(0).getWAL(null);
+    log.rollWriter();
+    String walInputDir = new Path(cluster.getMaster().getMasterFileSystem().getWALRootDir(),
+      HConstants.HREGION_LOGDIR_NAME).toString();
+
+    Configuration configuration = new Configuration(TEST_UTIL.getConfiguration());
+    String outPath = "/tmp/" + name.getMethodName();
+    configuration.set(WALPlayer.BULK_OUTPUT_CONF_KEY, outPath);
+    configuration.setBoolean(WALPlayer.MULTI_TABLES_SUPPORT, true);
+
+    WALPlayer player = new WALPlayer(configuration);
+    final byte[] finalLastVal = lastVal;
+
+    runWithDiskBasedSortingDisabledAndEnabled(() -> {
+      assertEquals(0, ToolRunner.run(configuration, player,
+        new String[] { walInputDir, tableName.getNameAsString() }));
+
+      // Get table descriptor and region info
+      TableDescriptor htd = TEST_UTIL.getAdmin().getDescriptor(tableName);
+      RegionInfo hri = TEST_UTIL.getAdmin().getRegions(tableName).get(0);
+
+      // Use the bulk output path as rootDir for ClientSideRegionScanner
+      Path bulkOutputRoot =
+        new Path(outPath, tableName.getNamespaceAsString() + "/" + tableName.getNameAsString());
+
+      // Create a scan to read the HFiles
+      Scan scan = new Scan();
+
+      // Open the HFiles using ClientSideRegionScanner
+      try (ClientSideRegionScanner scanner =
+        new ClientSideRegionScanner(configuration, fs, bulkOutputRoot, htd, hri, scan, null)) {
+
+        // Read the result
+        Result result = scanner.next();
+        assertThat(result, notNullValue());
+        assertThat(result.listCells(), notNullValue());
+
+        // Verify that the last value (highest sequence ID) wins
+        byte[] value = CellUtil.cloneValue(result.getColumnLatestCell(family, column));
+        assertThat(Bytes.toStringBinary(value), equalTo(Bytes.toStringBinary(finalLastVal)));
+
+        // Verify we've read the only row
+        result = scanner.next();
+        assertThat(result, nullValue());
+      }
 
       // cleanup
       Path out = new Path(outPath);
