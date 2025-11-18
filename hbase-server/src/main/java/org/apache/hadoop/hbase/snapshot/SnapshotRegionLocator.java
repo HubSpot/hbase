@@ -36,7 +36,6 @@ import org.apache.hadoop.hbase.client.RegionInfoBuilder;
 import org.apache.hadoop.hbase.client.RegionLocator;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.yetus.audience.InterfaceAudience;
-
 import org.apache.hadoop.hbase.shaded.protobuf.generated.HBaseProtos;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.SnapshotProtos;
 
@@ -55,6 +54,7 @@ public final class SnapshotRegionLocator implements RegionLocator {
     ServerName.parseServerName("www.example.net,1234,1212121212");
 
   private final TableName tableName;
+  private final SnapshotManifest manifest;
   private final TreeMap<byte[], HRegionReplicas> regions;
 
   private final List<HRegionLocation> rawLocations;
@@ -92,12 +92,13 @@ public final class SnapshotRegionLocator implements RegionLocator {
       replicas.put(key, hrr);
     }
 
-    return new SnapshotRegionLocator(tableName, replicas, rawLocations);
+    return new SnapshotRegionLocator(tableName, manifest, replicas, rawLocations);
   }
 
-  private SnapshotRegionLocator(TableName tableName, TreeMap<byte[], HRegionReplicas> regions,
+  private SnapshotRegionLocator(TableName tableName, SnapshotManifest manifest, TreeMap<byte[], HRegionReplicas> regions,
     List<HRegionLocation> rawLocations) {
     this.tableName = tableName;
+    this.manifest = manifest;
     this.regions = regions;
     this.rawLocations = rawLocations;
   }
@@ -131,6 +132,10 @@ public final class SnapshotRegionLocator implements RegionLocator {
   @Override
   public void close() throws IOException {
 
+  }
+
+  public SnapshotManifest getManifest() {
+    return manifest;
   }
 
   public static boolean shouldUseSnapshotRegionLocator(Configuration conf, TableName table) {
