@@ -134,10 +134,6 @@ public final class SnapshotRegionLocator implements RegionLocator {
 
   }
 
-  public SnapshotManifest getManifest() {
-    return manifest;
-  }
-
   public static boolean shouldUseSnapshotRegionLocator(Configuration conf, TableName table) {
     return conf.get(getSnapshotManifestDirKey(table)) != null;
   }
