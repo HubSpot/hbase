@@ -25,7 +25,11 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+<<<<<<< HEAD
 import java.util.concurrent.TimeUnit;
+=======
+import java.util.regex.Pattern;
+>>>>>>> 5c35dad9c74f426c4ecece4fd8d13e630089f231
 import java.util.stream.Collectors;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.backup.BackupCopyJob;
