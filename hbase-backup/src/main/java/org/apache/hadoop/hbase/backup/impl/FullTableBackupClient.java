@@ -48,6 +48,7 @@ import org.apache.hadoop.hbase.client.Admin;
 import org.apache.hadoop.hbase.client.Connection;
 import org.apache.hadoop.hbase.util.CommonFSUtils;
 import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
+import org.apache.hadoop.hbase.wal.AbstractFSWALProvider;
 import org.apache.yetus.audience.InterfaceAudience;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -204,6 +205,9 @@ public class FullTableBackupClient extends TableBackupClient {
       FileSystem fs = walRootDir.getFileSystem(conf);
       if (fs.exists(oldLogDir)) {
         for (FileStatus oldlog : fs.listStatus(oldLogDir)) {
+          if (AbstractFSWALProvider.isMetaFile(oldlog.getPath())) {
+            continue;
+          }
           String host = BackupUtils.parseHostFromOldLog(oldlog.getPath());
           if (host != null && !newTimestamps.containsKey(host)) {
             long ts = BackupUtils.getCreationTime(oldlog.getPath());
