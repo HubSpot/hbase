@@ -40,11 +40,8 @@ public interface BackupRestoreConstants {
   String BACKUP_ENABLE_KEY = "hbase.backup.enable";
   boolean BACKUP_ENABLE_DEFAULT = false;
 
-  String BACKUP_MAX_ATTEMPTS_KEY = "hbase.backup.attempts.max";
-  int DEFAULT_BACKUP_MAX_ATTEMPTS = 10;
-
-  String BACKUP_ATTEMPTS_PAUSE_MS_KEY = "hbase.backup.attempts.pause.ms";
-  int DEFAULT_BACKUP_ATTEMPTS_PAUSE_MS = 10000;
+  String BACKUP_WAIT_MS_KEY = "hbase.backup.attempts.wait.ms";
+  long DEFAULT_BACKUP_WAIT_MS = 10_000 * 10;
 
   /*
    * Drivers option list

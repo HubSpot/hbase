@@ -17,10 +17,8 @@
  */
 package org.apache.hadoop.hbase.backup.impl;
 
-import static org.apache.hadoop.hbase.backup.BackupRestoreConstants.BACKUP_ATTEMPTS_PAUSE_MS_KEY;
-import static org.apache.hadoop.hbase.backup.BackupRestoreConstants.BACKUP_MAX_ATTEMPTS_KEY;
-import static org.apache.hadoop.hbase.backup.BackupRestoreConstants.DEFAULT_BACKUP_ATTEMPTS_PAUSE_MS;
-import static org.apache.hadoop.hbase.backup.BackupRestoreConstants.DEFAULT_BACKUP_MAX_ATTEMPTS;
+import static org.apache.hadoop.hbase.backup.BackupRestoreConstants.BACKUP_WAIT_MS_KEY;
+import static org.apache.hadoop.hbase.backup.BackupRestoreConstants.DEFAULT_BACKUP_WAIT_MS;
 import static org.apache.hadoop.hbase.backup.BackupRestoreConstants.JOB_NAME_CONF_KEY;
 
 import java.io.IOException;
@@ -28,7 +26,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.regex.Pattern;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.backup.BackupCopyJob;
@@ -42,6 +40,8 @@ import org.apache.hadoop.hbase.backup.master.LogRollMasterProcedureManager;
 import org.apache.hadoop.hbase.backup.util.BackupUtils;
 import org.apache.hadoop.hbase.client.Admin;
 import org.apache.hadoop.hbase.client.Connection;
+import org.apache.hadoop.hbase.client.SnapshotDescription;
+import org.apache.hadoop.hbase.client.SnapshotType;
 import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
 import org.apache.yetus.audience.InterfaceAudience;
 import org.slf4j.Logger;
@@ -214,39 +214,18 @@ public class FullTableBackupClient extends TableBackupClient {
 
   protected void snapshotTable(Admin admin, TableName tableName, String snapshotName)
     throws IOException {
-    int maxAttempts = conf.getInt(BACKUP_MAX_ATTEMPTS_KEY, DEFAULT_BACKUP_MAX_ATTEMPTS);
-    int pause = conf.getInt(BACKUP_ATTEMPTS_PAUSE_MS_KEY, DEFAULT_BACKUP_ATTEMPTS_PAUSE_MS);
-    int attempts = 0;
+    long waitMs = conf.getLong(BACKUP_WAIT_MS_KEY, DEFAULT_BACKUP_WAIT_MS);
+    SnapshotDescription desc = new SnapshotDescription(snapshotName, tableName, SnapshotType.FLUSH);
 
-    Pattern regex = Pattern.compile(snapshotName);
+    try {
+      admin.snapshotAsync(desc).get(waitMs, TimeUnit.MILLISECONDS);
 
-    while (attempts++ < maxAttempts) {
-      try {
-        if (
-          admin.listSnapshots(regex).stream()
-            .anyMatch(snapshot -> snapshot.getName().equals(snapshotName))
-        ) {
-          // If a snapshot takes a long time to run, we may get a TimeoutException from the
-          // admin, in that case re-attempts to take a snapshot will always fail b/c we'll
-          // eventually
-          // attempt to take a snapshot with a name that already exists
-          return;
-        }
-        admin.snapshot(snapshotName, tableName);
-        return;
-      } catch (IOException ee) {
-        LOG.warn("Snapshot attempt " + attempts + " failed for table " + tableName
-          + ", sleeping for " + pause + "ms", ee);
-        if (attempts < maxAttempts) {
-          try {
-            Thread.sleep(pause);
-          } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            break;
-          }
-        }
-      }
+    } catch (Exception e) {
+      throw new RuntimeException("Failed to snapshot " + snapshotName + " to " + tableName, e);
     }
-    throw new IOException("Failed to snapshot table " + tableName);
+
+    if (!admin.isSnapshotFinished(desc)) {
+      throw new IOException("Snapshot " + snapshotName + " not finished.");
+    }
   }
 }
