@@ -82,7 +82,7 @@ public class ReplicationSourceShipper extends Thread {
     this.logQueue = logQueue;
     this.source = source;
     // 1 second
-    this.sleepForRetries = this.conf.getLong("replication.source.sleepforretries", 1000);
+    this.sleepForRetries = getSleepForRetries();
     // 5 minutes @ 1 sec per
     this.maxRetriesMultiplier = this.conf.getInt("replication.source.maxretriesmultiplier", 300);
     // 20 seconds
@@ -90,6 +90,25 @@ public class ReplicationSourceShipper extends Thread {
       this.conf.getInt("replication.source.getEntries.timeout", DEFAULT_TIMEOUT);
     this.shipEditsTimeout = this.conf.getInt(HConstants.REPLICATION_SOURCE_SHIPEDITS_TIMEOUT,
       HConstants.REPLICATION_SOURCE_SHIPEDITS_TIMEOUT_DFAULT);
+  }
+
+  /**
+   * Get the sleep time for retries. Check peer config map first, if set use it, otherwise fall back
+   * to global configuration.
+   * @return sleep time in milliseconds
+   */
+  private long getSleepForRetries() {
+    String peerConfigValue = source.replicationPeer.getPeerConfig().getConfiguration()
+      .get("replication.source.sleepforretries.override");
+    if (peerConfigValue != null) {
+      try {
+        return Long.parseLong(peerConfigValue);
+      } catch (NumberFormatException e) {
+        LOG.warn("Invalid sleepForRetries value in peer config: {}, using global default",
+          peerConfigValue);
+      }
+    }
+    return this.conf.getLong("replication.source.sleepforretries", 1000);
   }
 
   @Override

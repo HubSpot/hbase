@@ -201,7 +201,7 @@ public class ReplicationSource implements ReplicationSourceInterface {
       this.conf.getInt(WAIT_ON_ENDPOINT_SECONDS, DEFAULT_WAIT_ON_ENDPOINT_SECONDS);
     decorateConf();
     // 1 second
-    this.sleepForRetries = this.conf.getLong("replication.source.sleepforretries", 1000);
+    this.sleepForRetries = getSleepForRetries();
     // 5 minutes @ 1 sec per
     this.maxRetriesMultiplier = this.conf.getInt("replication.source.maxretriesmultiplier", 300);
     this.queueSizePerGroup = this.conf.getInt("hbase.regionserver.maxlogs", 32);
@@ -488,6 +488,25 @@ public class ReplicationSource implements ReplicationSourceInterface {
     long peerBandwidth = replicationPeer.getPeerBandwidth();
     // User can set peer bandwidth to 0 to use default bandwidth.
     return peerBandwidth != 0 ? peerBandwidth : defaultBandwidth;
+  }
+
+  /**
+   * Get the sleep time for retries. Check peer config map first, if set use it, otherwise fall back
+   * to global configuration.
+   * @return sleep time in milliseconds
+   */
+  private long getSleepForRetries() {
+    String peerConfigValue = replicationPeer.getPeerConfig().getConfiguration()
+      .get("replication.source.sleepforretries.override");
+    if (peerConfigValue != null) {
+      try {
+        return Long.parseLong(peerConfigValue);
+      } catch (NumberFormatException e) {
+        LOG.warn("Invalid sleepForRetries value in peer config: {}, using global default",
+          peerConfigValue);
+      }
+    }
+    return this.conf.getLong("replication.source.sleepforretries", 1000);
   }
 
   /**

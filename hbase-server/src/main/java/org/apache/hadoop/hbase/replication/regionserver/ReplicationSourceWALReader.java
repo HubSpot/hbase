@@ -104,7 +104,7 @@ class ReplicationSourceWALReader extends Thread {
     // the +1 is for the current thread reading before placing onto the queue
     int batchCount = conf.getInt("replication.source.nb.batches", 1);
     // 1 second
-    this.sleepForRetries = this.conf.getLong("replication.source.sleepforretries", 1000);
+    this.sleepForRetries = getSleepForRetries();
     // 5 minutes @ 1 sec per
     this.maxRetriesMultiplier = this.conf.getInt("replication.source.maxretriesmultiplier", 300);
     this.entryBatchQueue = new LinkedBlockingQueue<>(batchCount);
@@ -113,6 +113,25 @@ class ReplicationSourceWALReader extends Thread {
       + source.getPeerId() + " inited, replicationBatchSizeCapacity=" + replicationBatchSizeCapacity
       + ", replicationBatchCountCapacity=" + replicationBatchCountCapacity
       + ", replicationBatchQueueCapacity=" + batchCount);
+  }
+
+  /**
+   * Get the sleep time for retries. Check peer config map first, if set use it, otherwise fall back
+   * to global configuration.
+   * @return sleep time in milliseconds
+   */
+  private long getSleepForRetries() {
+    String peerConfigValue = source.replicationPeer.getPeerConfig().getConfiguration()
+      .get("replication.source.sleepforretries.override");
+    if (peerConfigValue != null) {
+      try {
+        return Long.parseLong(peerConfigValue);
+      } catch (NumberFormatException e) {
+        LOG.warn("Invalid sleepForRetries value in peer config: {}, using global default",
+          peerConfigValue);
+      }
+    }
+    return this.conf.getLong("replication.source.sleepforretries", 1000);
   }
 
   private void replicationDone() throws InterruptedException {
