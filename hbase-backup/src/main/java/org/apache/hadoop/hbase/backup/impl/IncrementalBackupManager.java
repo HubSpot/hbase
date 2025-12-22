@@ -18,6 +18,7 @@
 package org.apache.hadoop.hbase.backup.impl;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -249,6 +250,14 @@ public class IncrementalBackupManager extends BackupManager {
     // preventing re-backup of the same WAL files on subsequent incremental backups.
     for (String logFile : resultLogFiles) {
       Path logPath = new Path(logFile);
+      try {
+        long logTs = BackupUtils.getCreationTime(logPath);
+        if (logTs < System.currentTimeMillis() - Duration.ofDays(2).toMillis()) {
+          LOG.warn("Including old log file {}", logFile);
+        }
+      } catch (Exception e) {
+        LOG.warn("Error while parsing timestamp for {}", logFile);
+      }
       String logHost = BackupUtils.parseHostFromOldLog(logPath);
       if (logHost == null) {
         logHost = BackupUtils.parseHostNameFromLogFile(logPath.getParent());
@@ -264,6 +273,8 @@ public class IncrementalBackupManager extends BackupManager {
         }
       }
     }
+
+    LOG.info("Selected the following files for backup:\n{}", String.join("\n", resultLogFiles));
 
     return resultLogFiles;
   }
