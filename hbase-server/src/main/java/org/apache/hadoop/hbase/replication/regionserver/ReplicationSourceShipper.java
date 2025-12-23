@@ -312,9 +312,9 @@ public class ReplicationSourceShipper extends Thread {
    */
   public boolean sleepForRetries(String msg, int sleepMultiplier) {
     try {
-      long currentSleepForRetries = source.getCurrentSleepForRetries();
-      LOG.trace("{}, sleeping {} times {}", msg, currentSleepForRetries, sleepMultiplier);
-      Thread.sleep(currentSleepForRetries * sleepMultiplier);
+      long sleepForRetries = source.getSleepForRetries();
+      LOG.trace("{}, sleeping {} times {}", msg, sleepForRetries, sleepMultiplier);
+      Thread.sleep(sleepForRetries * sleepMultiplier);
     } catch (InterruptedException e) {
       LOG.debug("Interrupted while sleeping between retries");
       Thread.currentThread().interrupt();
@@ -347,7 +347,7 @@ public class ReplicationSourceShipper extends Thread {
           return;
         } else {
           // Wait both shipper and reader threads to stop
-          Thread.sleep(source.getCurrentSleepForRetries());
+          Thread.sleep(source.getSleepForRetries());
         }
       } catch (InterruptedException e) {
         LOG.warn("{} Interrupted while waiting {} to stop on clearWALEntryBatch. "

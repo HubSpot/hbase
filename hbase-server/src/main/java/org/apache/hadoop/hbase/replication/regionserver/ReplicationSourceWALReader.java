@@ -125,7 +125,7 @@ class ReplicationSourceWALReader extends Thread {
     if (sleepMultiplier < maxRetriesMultiplier) {
       sleepMultiplier++;
     }
-    Threads.sleep(source.getCurrentSleepForRetries() * sleepMultiplier);
+    Threads.sleep(source.getSleepForRetries() * sleepMultiplier);
     return sleepMultiplier;
   }
 
@@ -138,7 +138,7 @@ class ReplicationSourceWALReader extends Thread {
         while (isReaderRunning()) { // loop here to keep reusing stream while we can
           if (!source.isPeerEnabled()) {
             waitingPeerEnabled.set(true);
-            Threads.sleep(source.getCurrentSleepForRetries());
+            Threads.sleep(source.getSleepForRetries());
             continue;
           } else {
             waitingPeerEnabled.set(false);
@@ -273,7 +273,7 @@ class ReplicationSourceWALReader extends Thread {
   private boolean checkBufferQuota() {
     // try not to go over total quota
     if (!this.getSourceManager().checkBufferQuota(this.source.getPeerId())) {
-      Threads.sleep(source.getCurrentSleepForRetries());
+      Threads.sleep(source.getSleepForRetries());
       return false;
     }
     return true;
