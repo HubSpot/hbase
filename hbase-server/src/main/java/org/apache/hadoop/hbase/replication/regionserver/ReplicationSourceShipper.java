@@ -67,8 +67,6 @@ public class ReplicationSourceShipper extends Thread {
   private volatile WorkerState state;
   protected ReplicationSourceWALReader entryReader;
 
-  // How long should we sleep for each retry
-  protected final long sleepForRetries;
   // Maximum number of retries before taking bold actions
   protected final int maxRetriesMultiplier;
   private final int DEFAULT_TIMEOUT = 20000;
@@ -81,8 +79,6 @@ public class ReplicationSourceShipper extends Thread {
     this.walGroupId = walGroupId;
     this.logQueue = logQueue;
     this.source = source;
-    // 1 second
-    this.sleepForRetries = getSleepForRetries();
     // 5 minutes @ 1 sec per
     this.maxRetriesMultiplier = this.conf.getInt("replication.source.maxretriesmultiplier", 300);
     // 20 seconds
@@ -90,25 +86,6 @@ public class ReplicationSourceShipper extends Thread {
       this.conf.getInt("replication.source.getEntries.timeout", DEFAULT_TIMEOUT);
     this.shipEditsTimeout = this.conf.getInt(HConstants.REPLICATION_SOURCE_SHIPEDITS_TIMEOUT,
       HConstants.REPLICATION_SOURCE_SHIPEDITS_TIMEOUT_DFAULT);
-  }
-
-  /**
-   * Get the sleep time for retries. Check peer config map first, if set use it, otherwise fall back
-   * to global configuration.
-   * @return sleep time in milliseconds
-   */
-  private long getSleepForRetries() {
-    String peerConfigValue = source.replicationPeer.getPeerConfig().getConfiguration()
-      .get("replication.source.sleepforretries.override");
-    if (peerConfigValue != null) {
-      try {
-        return Long.parseLong(peerConfigValue);
-      } catch (NumberFormatException e) {
-        LOG.warn("Invalid sleepForRetries value in peer config: {}, using global default",
-          peerConfigValue);
-      }
-    }
-    return this.conf.getLong("replication.source.sleepforretries", 1000);
   }
 
   @Override
@@ -335,8 +312,9 @@ public class ReplicationSourceShipper extends Thread {
    */
   public boolean sleepForRetries(String msg, int sleepMultiplier) {
     try {
-      LOG.trace("{}, sleeping {} times {}", msg, sleepForRetries, sleepMultiplier);
-      Thread.sleep(this.sleepForRetries * sleepMultiplier);
+      long currentSleepForRetries = source.getCurrentSleepForRetries();
+      LOG.trace("{}, sleeping {} times {}", msg, currentSleepForRetries, sleepMultiplier);
+      Thread.sleep(currentSleepForRetries * sleepMultiplier);
     } catch (InterruptedException e) {
       LOG.debug("Interrupted while sleeping between retries");
       Thread.currentThread().interrupt();
@@ -369,7 +347,7 @@ public class ReplicationSourceShipper extends Thread {
           return;
         } else {
           // Wait both shipper and reader threads to stop
-          Thread.sleep(this.sleepForRetries);
+          Thread.sleep(source.getCurrentSleepForRetries());
         }
       } catch (InterruptedException e) {
         LOG.warn("{} Interrupted while waiting {} to stop on clearWALEntryBatch. "

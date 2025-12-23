@@ -69,7 +69,6 @@ class ReplicationSourceWALReader extends Thread {
   private final int replicationBatchCountCapacity;
   // position in the WAL to start reading at
   private long currentPosition;
-  private final long sleepForRetries;
   private final int maxRetriesMultiplier;
 
   // Indicates whether this particular worker is running
@@ -103,8 +102,6 @@ class ReplicationSourceWALReader extends Thread {
     // memory used will be batchSizeCapacity * (nb.batches + 1)
     // the +1 is for the current thread reading before placing onto the queue
     int batchCount = conf.getInt("replication.source.nb.batches", 1);
-    // 1 second
-    this.sleepForRetries = getSleepForRetries();
     // 5 minutes @ 1 sec per
     this.maxRetriesMultiplier = this.conf.getInt("replication.source.maxretriesmultiplier", 300);
     this.entryBatchQueue = new LinkedBlockingQueue<>(batchCount);
@@ -113,25 +110,6 @@ class ReplicationSourceWALReader extends Thread {
       + source.getPeerId() + " inited, replicationBatchSizeCapacity=" + replicationBatchSizeCapacity
       + ", replicationBatchCountCapacity=" + replicationBatchCountCapacity
       + ", replicationBatchQueueCapacity=" + batchCount);
-  }
-
-  /**
-   * Get the sleep time for retries. Check peer config map first, if set use it, otherwise fall back
-   * to global configuration.
-   * @return sleep time in milliseconds
-   */
-  private long getSleepForRetries() {
-    String peerConfigValue = source.replicationPeer.getPeerConfig().getConfiguration()
-      .get("replication.source.sleepforretries.override");
-    if (peerConfigValue != null) {
-      try {
-        return Long.parseLong(peerConfigValue);
-      } catch (NumberFormatException e) {
-        LOG.warn("Invalid sleepForRetries value in peer config: {}, using global default",
-          peerConfigValue);
-      }
-    }
-    return this.conf.getLong("replication.source.sleepforretries", 1000);
   }
 
   private void replicationDone() throws InterruptedException {
@@ -147,7 +125,7 @@ class ReplicationSourceWALReader extends Thread {
     if (sleepMultiplier < maxRetriesMultiplier) {
       sleepMultiplier++;
     }
-    Threads.sleep(sleepForRetries * sleepMultiplier);
+    Threads.sleep(source.getCurrentSleepForRetries() * sleepMultiplier);
     return sleepMultiplier;
   }
 
@@ -160,7 +138,7 @@ class ReplicationSourceWALReader extends Thread {
         while (isReaderRunning()) { // loop here to keep reusing stream while we can
           if (!source.isPeerEnabled()) {
             waitingPeerEnabled.set(true);
-            Threads.sleep(sleepForRetries);
+            Threads.sleep(source.getCurrentSleepForRetries());
             continue;
           } else {
             waitingPeerEnabled.set(false);
@@ -295,7 +273,7 @@ class ReplicationSourceWALReader extends Thread {
   private boolean checkBufferQuota() {
     // try not to go over total quota
     if (!this.getSourceManager().checkBufferQuota(this.source.getPeerId())) {
-      Threads.sleep(sleepForRetries);
+      Threads.sleep(source.getCurrentSleepForRetries());
       return false;
     }
     return true;

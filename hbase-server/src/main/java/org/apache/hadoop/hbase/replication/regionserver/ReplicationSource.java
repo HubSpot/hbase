@@ -484,6 +484,15 @@ public class ReplicationSource implements ReplicationSourceInterface {
     }
   }
 
+  private void checkSleepForRetriesChange() {
+    long newSleepForRetries = getSleepForRetries();
+    if (newSleepForRetries != sleepForRetries) {
+      LOG.info("ReplicationSource : {} sleepForRetries changed from {} to {}", peerId,
+        sleepForRetries, newSleepForRetries);
+      sleepForRetries = newSleepForRetries;
+    }
+  }
+
   private long getCurrentBandwidth() {
     long peerBandwidth = replicationPeer.getPeerBandwidth();
     // User can set peer bandwidth to 0 to use default bandwidth.
@@ -495,7 +504,7 @@ public class ReplicationSource implements ReplicationSourceInterface {
    * to global configuration.
    * @return sleep time in milliseconds
    */
-  private long getSleepForRetries() {
+  protected long getSleepForRetries() {
     String peerConfigValue = replicationPeer.getPeerConfig().getConfiguration()
       .get("replication.source.sleepforretries.override");
     if (peerConfigValue != null) {
@@ -510,12 +519,21 @@ public class ReplicationSource implements ReplicationSourceInterface {
   }
 
   /**
+   * Get the current cached sleep for retries value.
+   * @return current sleep time in milliseconds
+   */
+  protected long getCurrentSleepForRetries() {
+    return sleepForRetries;
+  }
+
+  /**
    * Do the sleeping logic
    * @param msg             Why we sleep
    * @param sleepMultiplier by how many times the default sleeping time is augmented
    * @return True if <code>sleepMultiplier</code> is &lt; <code>maxRetriesMultiplier</code>
    */
   protected boolean sleepForRetries(String msg, int sleepMultiplier) {
+    checkSleepForRetriesChange();
     try {
       if (LOG.isTraceEnabled()) {
         LOG.trace("{} {}, sleeping {} times {}", logPeerId(), msg, sleepForRetries,
