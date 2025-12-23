@@ -267,7 +267,7 @@ public class IncrementalBackupManager extends BackupManager {
         Long existingTs = newestTimestamps.get(logHost);
         if (existingTs == null || logTs > existingTs) {
           newestTimestamps.put(logHost, logTs);
-          if (existingTs == null) {
+          if (existingTs == null || existingTs.equals(olderTimestamps.get(logHost))) {
             LOG.info("Updating backup boundary for inactive host {}: timestamp={}", logHost, logTs);
           }
         }

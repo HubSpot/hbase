@@ -22,7 +22,6 @@ import static org.apache.hadoop.hbase.backup.BackupRestoreConstants.BACKUP_MAX_A
 import static org.apache.hadoop.hbase.backup.BackupRestoreConstants.DEFAULT_BACKUP_ATTEMPTS_PAUSE_MS;
 import static org.apache.hadoop.hbase.backup.BackupRestoreConstants.DEFAULT_BACKUP_MAX_ATTEMPTS;
 import static org.apache.hadoop.hbase.backup.BackupRestoreConstants.JOB_NAME_CONF_KEY;
-
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -209,10 +208,12 @@ public class FullTableBackupClient extends TableBackupClient {
             continue;
           }
           String host = BackupUtils.parseHostFromOldLog(oldlog.getPath());
-          if (host != null && !newTimestamps.containsKey(host)) {
-            long ts = BackupUtils.getCreationTime(oldlog.getPath());
-            newTimestamps.put(host, ts);
-            LOG.info("Updating backup boundary for inactive host {}: timestamp={}", host, ts);
+          if (host != null) {
+            long logTs = BackupUtils.getCreationTime(oldlog.getPath());
+            Long existingTs = newTimestamps.get(host);
+            if (existingTs == null || logTs > existingTs) {
+              newTimestamps.put(host, logTs);
+            }
           }
         }
       }
