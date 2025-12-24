@@ -768,6 +768,7 @@ AssignmentManager assignmentManager = master.getAssignmentManager();
         <th>State</th>
         <th>IsSerial</th>
         <th>Bandwidth</th>
+        <th>Sleep For Retries</th>
         <th>ReplicateAll</th>
         <th>Namespaces</th>
         <th>Exclude Namespaces</th>
@@ -787,6 +788,7 @@ AssignmentManager assignmentManager = master.getAssignmentManager();
         <td><% peer.isEnabled() ? "ENABLED" : "DISABLED" %></td>
         <td><% peerConfig.isSerial() %></td>
         <td><% peerConfig.getBandwidth() == 0? "UNLIMITED" : Strings.humanReadableInt(peerConfig.getBandwidth()) %></td>
+        <td><% peerConfig.getSleepForRetries() == 0? "DEFAULT" : peerConfig.getSleepForRetries() + " ms" %></td>
         <td><% peerConfig.replicateAllUserTables() %></td>
         <td>
            <% peerConfig.getNamespaces() == null ? "" : ReplicationPeerConfigUtil.convertToString(peerConfig.getNamespaces()).replaceAll(";", "; ") %>
