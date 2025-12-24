@@ -22,11 +22,14 @@ import static org.apache.hadoop.hbase.backup.BackupRestoreConstants.BACKUP_MAX_A
 import static org.apache.hadoop.hbase.backup.BackupRestoreConstants.DEFAULT_BACKUP_ATTEMPTS_PAUSE_MS;
 import static org.apache.hadoop.hbase.backup.BackupRestoreConstants.DEFAULT_BACKUP_MAX_ATTEMPTS;
 import static org.apache.hadoop.hbase.backup.BackupRestoreConstants.JOB_NAME_CONF_KEY;
+
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeSet;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import org.apache.hadoop.fs.FileStatus;
@@ -164,13 +167,14 @@ public class FullTableBackupClient extends TableBackupClient {
       // will be part of the snapshot being taken). We gather this list before taking the actual
       // snapshots for the same reason as the log rolls.
       List<BulkLoad> bulkLoadsToDelete = backupManager.readBulkloadRows(tableList);
+      Map<String, Long> previousLogRollsByHost = backupManager.readRegionServerLastLogRollResult();
 
       Map<String, String> props = new HashMap<>();
       props.put("backupRoot", backupInfo.getBackupRootDir());
       admin.execProcedure(LogRollMasterProcedureManager.ROLLLOG_PROCEDURE_SIGNATURE,
         LogRollMasterProcedureManager.ROLLLOG_PROCEDURE_NAME, props);
 
-      newTimestamps = backupManager.readRegionServerLastLogRollResult();
+      Map<String, Long> latestLogRollsByHost = backupManager.readRegionServerLastLogRollResult();
 
       // SNAPSHOT_TABLES:
       backupInfo.setPhase(BackupPhase.SNAPSHOT);
@@ -200,21 +204,50 @@ public class FullTableBackupClient extends TableBackupClient {
       // to newTimestamps. This ensures subsequent incremental backups won't try to back up
       // WALs that are already covered by this full backup's snapshot.
       Path walRootDir = CommonFSUtils.getWALRootDir(conf);
+      Path logDir = new Path(walRootDir, HConstants.HREGION_LOGDIR_NAME);
       Path oldLogDir = new Path(walRootDir, HConstants.HREGION_OLDLOGDIR_NAME);
       FileSystem fs = walRootDir.getFileSystem(conf);
-      if (fs.exists(oldLogDir)) {
-        for (FileStatus oldlog : fs.listStatus(oldLogDir)) {
-          if (AbstractFSWALProvider.isMetaFile(oldlog.getPath())) {
-            continue;
+
+      List<FileStatus> allLogs = new ArrayList<>();
+      allLogs.addAll(Arrays.asList(fs.listStatus(logDir)));
+      allLogs.addAll(Arrays.asList(fs.listStatus(oldLogDir)));
+
+      Map<String, TreeSet<Long>> logsByHost = new HashMap<>();
+
+      for (FileStatus log : allLogs) {
+        if (AbstractFSWALProvider.isMetaFile(log.getPath())) {
+          continue;
+        }
+        String host = BackupUtils.parseHostNameFromLogFile(log.getPath());
+        if (host == null) {
+          host = BackupUtils.parseHostFromOldLog(log.getPath());
+        }
+        if (host == null) {
+          continue;
+        }
+        long timestamp = BackupUtils.getCreationTime(log.getPath());
+        logsByHost.computeIfAbsent(host, (h) -> new TreeSet<>()).add(timestamp);
+      }
+
+      newTimestamps = new HashMap<>();
+      for (String host : logsByHost.keySet()) {
+        TreeSet<Long> logs = logsByHost.get(host);
+        Long previousLogRoll = previousLogRollsByHost.get(host);
+        Long latestLogRoll = latestLogRollsByHost.get(host);
+        boolean isInactive = latestLogRoll == null || latestLogRoll.equals(previousLogRoll);
+
+        Long lastTimestampIncludedInBackup = null;
+        if (isInactive) {
+          if (!logs.isEmpty()) {
+            LOG.info("Updating backup boundary for inactive host {}: timestamp={}", host, logs.last());
+            lastTimestampIncludedInBackup = logs.last();
           }
-          String host = BackupUtils.parseHostFromOldLog(oldlog.getPath());
-          if (host != null) {
-            long logTs = BackupUtils.getCreationTime(oldlog.getPath());
-            Long existingTs = newTimestamps.get(host);
-            if (existingTs == null || logTs > existingTs) {
-              newTimestamps.put(host, logTs);
-            }
-          }
+        } else {
+          lastTimestampIncludedInBackup = latestLogRoll;
+        }
+
+        if (latestLogRoll != null) {
+          newTimestamps.put(host, lastTimestampIncludedInBackup);
         }
       }
 

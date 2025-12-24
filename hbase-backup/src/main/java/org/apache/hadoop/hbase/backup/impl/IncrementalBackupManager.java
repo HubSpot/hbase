@@ -62,7 +62,7 @@ public class IncrementalBackupManager extends BackupManager {
    */
   public Map<String, Long> getIncrBackupLogFileMap() throws IOException {
     List<String> logList;
-    Map<String, Long> newTimestamps;
+    Map<String, Long> newTimestamps = new HashMap<>();
     Map<String, Long> previousTimestampMins;
 
     String savedStartCode = readBackupStartCode();
@@ -96,7 +96,26 @@ public class IncrementalBackupManager extends BackupManager {
           LogRollMasterProcedureManager.ROLLLOG_PROCEDURE_NAME, props);
       }
     }
-    newTimestamps = readRegionServerLastLogRollResult();
+
+    Map<String, Long> latestLogRollByHost = readRegionServerLastLogRollResult();
+    for (String host : latestLogRollByHost.keySet()) {
+      Long earliestTimestampToIncludeInBackup = previousTimestampMins.get(host);
+      long latestLogRoll = latestLogRollByHost.get(host);
+
+      boolean isInactive = earliestTimestampToIncludeInBackup != null
+        && earliestTimestampToIncludeInBackup > latestLogRoll;
+
+      long latestTimestampToIncludeInBackup;
+      if (isInactive) {
+        LOG.info("Avoided resetting latest timestamp boundary for {} from {} to {}", host,
+          earliestTimestampToIncludeInBackup, latestLogRoll);
+        // getLogFilesForNewBackup will further update this timestamp if there are newer log files
+        latestTimestampToIncludeInBackup = earliestTimestampToIncludeInBackup;
+      } else {
+        latestTimestampToIncludeInBackup = latestLogRoll;
+      }
+      newTimestamps.put(host, latestTimestampToIncludeInBackup);
+    }
 
     logList = getLogFilesForNewBackup(previousTimestampMins, newTimestamps, conf, savedStartCode);
     logList = excludeProcV2WALs(logList);
@@ -264,12 +283,10 @@ public class IncrementalBackupManager extends BackupManager {
       }
       if (logHost != null) {
         long logTs = BackupUtils.getCreationTime(logPath);
-        Long existingTs = newestTimestamps.get(logHost);
-        if (existingTs == null || logTs > existingTs) {
+        Long latestTimestampToIncludeInBackup = newestTimestamps.get(logHost);
+        if (latestTimestampToIncludeInBackup == null || logTs > latestTimestampToIncludeInBackup) {
+          LOG.info("Updating backup boundary for inactive host {}: timestamp={}", logHost, logTs);
           newestTimestamps.put(logHost, logTs);
-          if (existingTs == null || existingTs.equals(olderTimestamps.get(logHost))) {
-            LOG.info("Updating backup boundary for inactive host {}: timestamp={}", logHost, logTs);
-          }
         }
       }
     }
