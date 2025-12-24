@@ -209,7 +209,13 @@ public class FullTableBackupClient extends TableBackupClient {
       FileSystem fs = walRootDir.getFileSystem(conf);
 
       List<FileStatus> allLogs = new ArrayList<>();
-      allLogs.addAll(Arrays.asList(fs.listStatus(logDir)));
+      for (FileStatus hostLogDir : fs.listStatus(logDir)) {
+        String host = BackupUtils.parseHostNameFromLogFile(hostLogDir.getPath());
+        if (host == null) {
+          continue;
+        }
+        allLogs.addAll(Arrays.asList(fs.listStatus(hostLogDir.getPath())));
+      }
       allLogs.addAll(Arrays.asList(fs.listStatus(oldLogDir)));
 
       Map<String, TreeSet<Long>> logsByHost = new HashMap<>();
