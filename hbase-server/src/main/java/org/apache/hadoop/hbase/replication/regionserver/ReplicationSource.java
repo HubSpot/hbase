@@ -487,20 +487,14 @@ public class ReplicationSource implements ReplicationSourceInterface {
   }
 
   /**
-   * Get the sleep time for retries. Check peer config map first, if set use it, otherwise fall back
-   * to global configuration.
+   * Get the sleep time for retries. Check peer config first, if set use it, otherwise fall back to
+   * global configuration.
    * @return sleep time in milliseconds
    */
   protected long getSleepForRetries() {
-    String peerConfigValue = replicationPeer.getPeerConfig().getConfiguration()
-      .get("replication.source.sleepforretries.override");
-    if (peerConfigValue != null) {
-      try {
-        return Long.parseLong(peerConfigValue);
-      } catch (NumberFormatException e) {
-        LOG.warn("Invalid sleepForRetries value in peer config: {}, using global default",
-          peerConfigValue);
-      }
+    long peerSleepForRetries = replicationPeer.getPeerConfig().getSleepForRetries();
+    if (peerSleepForRetries > 0) {
+      return peerSleepForRetries;
     }
     return this.conf.getLong("replication.source.sleepforretries", 1000);
   }

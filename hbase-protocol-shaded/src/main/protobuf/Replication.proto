@@ -50,6 +50,7 @@ message ReplicationPeer {
   repeated TableCF exclude_table_cfs = 9;
   repeated bytes exclude_namespaces = 10;
   optional bool serial = 11;
+  optional int64 sleep_for_retries = 12;
 }
 
 /**
