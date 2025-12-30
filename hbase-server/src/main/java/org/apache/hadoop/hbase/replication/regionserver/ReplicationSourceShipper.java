@@ -372,7 +372,7 @@ public class ReplicationSourceShipper extends Thread {
     }
   }
 
-  long getSleepForRetriesForTesting() {
+  long getSleepForRetries() {
     return sleepForRetries;
   }
 
