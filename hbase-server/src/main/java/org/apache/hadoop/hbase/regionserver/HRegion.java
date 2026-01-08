@@ -1859,27 +1859,37 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
             }
           });
         }
+        // Collect all results, continuing even if some stores fail to close.
+        // This ensures all store close operations complete before we exit,
+        // preventing orphaned file descriptors from incomplete close chains.
+        IOException ioe = null;
         try {
           for (int i = 0; i < stores.size(); i++) {
-            Future<Pair<byte[], Collection<HStoreFile>>> future = completionService.take();
-            Pair<byte[], Collection<HStoreFile>> storeFiles = future.get();
-            List<HStoreFile> familyFiles = result.get(storeFiles.getFirst());
-            if (familyFiles == null) {
-              familyFiles = new ArrayList<>();
-              result.put(storeFiles.getFirst(), familyFiles);
+            try {
+              Future<Pair<byte[], Collection<HStoreFile>>> future = completionService.take();
+              Pair<byte[], Collection<HStoreFile>> storeFiles = future.get();
+              List<HStoreFile> familyFiles = result.get(storeFiles.getFirst());
+              if (familyFiles == null) {
+                familyFiles = new ArrayList<>();
+                result.put(storeFiles.getFirst(), familyFiles);
+              }
+              familyFiles.addAll(storeFiles.getSecond());
+            } catch (InterruptedException e) {
+              if (ioe == null) {
+                ioe = new InterruptedIOException();
+                ioe.initCause(e);
+              }
+            } catch (ExecutionException e) {
+              if (ioe == null) {
+                ioe = unwrapExecutionException(e);
+              }
             }
-            familyFiles.addAll(storeFiles.getSecond());
           }
-        } catch (InterruptedException e) {
-          throw throwOnInterrupt(e);
-        } catch (ExecutionException e) {
-          Throwable cause = e.getCause();
-          if (cause instanceof IOException) {
-            throw (IOException) cause;
-          }
-          throw new IOException(cause);
         } finally {
           storeCloserThreadPool.shutdownNow();
+        }
+        if (ioe != null) {
+          throw ioe;
         }
       }
 
@@ -8513,6 +8523,17 @@ public class HRegion implements HeapSize, PropagatingConfigurationObserver, Regi
         getRegionInfo().getRegionNameAsString() + " is closing").initCause(t);
     }
     return (InterruptedIOException) new InterruptedIOException().initCause(t);
+  }
+
+  /**
+   * Unwrap an ExecutionException to get the underlying IOException, or wrap the cause in one.
+   */
+  private static IOException unwrapExecutionException(ExecutionException e) {
+    Throwable cause = e.getCause();
+    if (cause instanceof IOException) {
+      return (IOException) cause;
+    }
+    return new IOException(cause);
   }
 
   /**
