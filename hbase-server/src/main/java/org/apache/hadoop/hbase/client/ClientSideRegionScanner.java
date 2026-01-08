@@ -32,6 +32,8 @@ import org.apache.hadoop.hbase.io.hfile.BlockCache;
 import org.apache.hadoop.hbase.io.hfile.BlockCacheFactory;
 import org.apache.hadoop.hbase.mob.MobFileCache;
 import org.apache.hadoop.hbase.regionserver.HRegion;
+import org.apache.hadoop.hbase.regionserver.HStore;
+import org.apache.hadoop.hbase.regionserver.HStoreFile;
 import org.apache.hadoop.hbase.regionserver.RegionScanner;
 import org.apache.hadoop.hbase.util.CommonFSUtils;
 import org.apache.yetus.audience.InterfaceAudience;
@@ -82,6 +84,14 @@ public class ClientSideRegionScanner extends AbstractClientScanner {
     mobFileCache = new MobFileCache(conf);
     region.setMobFileCache(mobFileCache);
     region.initialize();
+
+    // Close pread reader streams since we only use stream mode for snapshot scanning.
+    // This releases file descriptors while keeping metadata (bloom filters, etc.) accessible.
+    for (HStore store : region.getStores()) {
+      for (HStoreFile sf : store.getStorefiles()) {
+        sf.closeInitialReaderStreams();
+      }
+    }
 
     // create an internal region scanner
     this.scanner = region.getScanner(scan);

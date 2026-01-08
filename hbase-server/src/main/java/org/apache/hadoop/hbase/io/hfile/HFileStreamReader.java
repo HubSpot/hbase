@@ -36,4 +36,9 @@ public class HFileStreamReader extends HFileReaderImpl {
   public void close(boolean evictOnClose) throws IOException {
     fsBlockReader.closeStreams();
   }
+
+  @Override
+  public void closeStreams() throws IOException {
+    fsBlockReader.closeStreams();
+  }
 }

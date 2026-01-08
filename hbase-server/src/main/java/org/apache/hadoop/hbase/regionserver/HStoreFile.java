@@ -597,6 +597,18 @@ public class HStoreFile implements StoreFile {
   }
 
   /**
+   * Close the initial (pread) reader's underlying streams while keeping metadata accessible.
+   * Call this after creating a stream scanner when pread access is no longer needed.
+   * The initialReader remains non-null so closeStoreFile() can still be called,
+   * but its streams are already closed.
+   */
+  public synchronized void closeInitialReaderStreams() throws IOException {
+    if (this.initialReader != null) {
+      this.initialReader.closeStreams();
+    }
+  }
+
+  /**
    * Delete this file
    */
   public void deleteStoreFile() throws IOException {

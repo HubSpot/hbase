@@ -465,6 +465,15 @@ public final class HFile {
      */
     void unbufferStream();
 
+    /**
+     * Close the underlying input streams without invalidating the reader's cached metadata.
+     * After calling this method, the reader should not be used for reading data blocks,
+     * but cached metadata (bloom filters, keys, etc.) remains accessible.
+     * This is useful when a stream reader has copied metadata from a pread reader
+     * and the pread reader's streams are no longer needed.
+     */
+    void closeStreams() throws IOException;
+
     ReaderContext getContext();
 
     HFileInfo getHFileInfo();

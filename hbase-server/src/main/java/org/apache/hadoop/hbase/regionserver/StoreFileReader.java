@@ -215,6 +215,10 @@ public class StoreFileReader {
     reader.close(evictOnClose);
   }
 
+  public void closeStreams() throws IOException {
+    reader.closeStreams();
+  }
+
   /**
    * Check if this storeFile may contain keys within the TimeRange that have not expired (i.e. not
    * older than oldestUnexpiredTS).

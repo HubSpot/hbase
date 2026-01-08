@@ -174,4 +174,10 @@ public class HFilePreadReader extends HFileReaderImpl {
     });
     fsBlockReader.closeStreams();
   }
+
+  @Override
+  public void closeStreams() throws IOException {
+    PrefetchExecutor.cancel(path);
+    fsBlockReader.closeStreams();
+  }
 }
