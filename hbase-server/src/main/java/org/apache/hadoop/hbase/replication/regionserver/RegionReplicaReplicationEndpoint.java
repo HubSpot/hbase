@@ -440,7 +440,11 @@ public class RegionReplicaReplicationEndpoint extends HBaseReplicationEndpoint {
           // keep going to the cache, we will not learn of the replicas and their locations after
           // they come online.
           if (useCache && locations.size() == 1) {
-            if (tableDescriptors.get(tableName).getRegionReplication() > 1) {
+            TableDescriptor td = tableDescriptors.get(tableName);
+            if (td == null) {
+              LOG.info("BUG: Table descriptor for table {} is null", tableName.getNameAsString());
+            }
+            if (td != null && td.getRegionReplication() > 1) {
               // Make an obnoxious log here. See how bad this issue is. Add a timer if happening
               // too much.
               LOG.info("Skipping location cache; only one location found for {}", tableName);

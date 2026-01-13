@@ -211,7 +211,7 @@ public class FSTableDescriptors implements TableDescriptors {
       tdmt = getTableDescriptorFromFs(fs, getTableDir(tableName), fsreadonly).map(Pair::getSecond)
         .orElse(null);
     } catch (IOException ioe) {
-      LOG.debug("Exception during readTableDecriptor. Current table name = " + tableName, ioe);
+      LOG.info("Exception during readTableDecriptor. Current table name = " + tableName, ioe);
     }
     // last HTD written wins
     if (usecache && tdmt != null) {
