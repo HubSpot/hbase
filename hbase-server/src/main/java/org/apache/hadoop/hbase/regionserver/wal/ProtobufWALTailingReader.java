@@ -268,16 +268,28 @@ public class ProtobufWALTailingReader extends AbstractProtobufWALReader
 
   @Override
   public void resetTo(long position, boolean resetCompression) throws IOException {
+    long resetStartNs = System.nanoTime();
     close();
+    long closeMs = (System.nanoTime() - resetStartNs) / 1_000_000;
+
+    long openStartNs = System.nanoTime();
     Pair<FSDataInputStream, FileStatus> pair = open();
+    long openMs = (System.nanoTime() - openStartNs) / 1_000_000;
+
     boolean resetSucceed = false;
     try {
+      long trailerStartNs = 0;
+      long trailerMs = 0;
       if (!trailerPresent) {
         // try read trailer this time
+        trailerStartNs = System.nanoTime();
         readTrailer(pair.getFirst(), pair.getSecond());
+        trailerMs = (System.nanoTime() - trailerStartNs) / 1_000_000;
       }
       inputStream = pair.getFirst();
       delegatingInput.setDelegate(inputStream);
+
+      long seekStartNs = System.nanoTime();
       if (position < 0) {
         // read from the beginning
         if (compressionCtx != null) {
@@ -295,7 +307,17 @@ public class ProtobufWALTailingReader extends AbstractProtobufWALReader
         // just seek to the expected position
         inputStream.seek(position);
       }
+      long seekMs = (System.nanoTime() - seekStartNs) / 1_000_000;
       resetSucceed = true;
+
+      long totalMs = (System.nanoTime() - resetStartNs) / 1_000_000;
+      if (LOG.isDebugEnabled() && totalMs > 100) {
+        LOG.debug(
+          "REPL_TIMING: [stage=WAL_READ] [operation=reset_to_breakdown] [total_ms={}] "
+            + "[close_ms={}] [open_ms={}] [trailer_ms={}] [seek_ms={}] [position={}] "
+            + "[reset_compression={}] [file={}]",
+          totalMs, closeMs, openMs, trailerMs, seekMs, position, resetCompression, path.getName());
+      }
     } finally {
       if (!resetSucceed) {
         // close the input stream to avoid resource leak

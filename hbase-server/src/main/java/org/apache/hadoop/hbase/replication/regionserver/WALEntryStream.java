@@ -232,8 +232,8 @@ class WALEntryStream implements Closeable {
           if (LOG.isDebugEnabled() && resetMs > 100) {
             LOG.debug(
               "REPL_TIMING: [stage=WAL_READ] [operation=reset_reader] [duration_ms={}] "
-                + "[file={}] [position={}] [wal_group={}]",
-              resetMs, currentPath.getName(), currentPositionOfEntry, walGroupId);
+                + "[state={}] [file={}] [position={}] [wal_group={}]",
+              resetMs, state, currentPath.getName(), currentPositionOfEntry, walGroupId);
           }
           return HasNext.YES;
         } catch (FileNotFoundException e) {
@@ -400,6 +400,13 @@ class WALEntryStream implements Closeable {
     boolean beingWritten = pair.getSecond();
     LOG.trace("Reading WAL {}; result={}, currently open for write={}", this.currentPath, state,
       beingWritten);
+    // Log non-NORMAL states to understand why reader is resetting
+    if (LOG.isDebugEnabled() && state != WALTailingReader.State.NORMAL) {
+      LOG.debug(
+        "REPL_TIMING: [stage=WAL_READ] [operation=non_normal_state] [state={}] "
+          + "[being_written={}] [position={}] [file={}] [wal_group={}]",
+        state, beingWritten, currentPositionOfReader, currentPath.getName(), walGroupId);
+    }
     // The below implementation needs to make sure that when beingWritten == true, we should not
     // dequeue the current WAL file in logQueue.
     switch (state) {
