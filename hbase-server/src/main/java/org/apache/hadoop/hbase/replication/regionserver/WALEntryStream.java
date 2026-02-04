@@ -225,8 +225,16 @@ class WALEntryStream implements Closeable {
         // reset before reading
         LOG.debug("Reset reader {} to pos {}, reset compression={}", currentPath,
           currentPositionOfEntry, state.resetCompression());
+        long resetStartNs = System.nanoTime();
         try {
           resetReader();
+          long resetMs = (System.nanoTime() - resetStartNs) / 1_000_000;
+          if (LOG.isDebugEnabled() && resetMs > 100) {
+            LOG.debug(
+              "REPL_TIMING: [stage=WAL_READ] [operation=reset_reader] [duration_ms={}] "
+                + "[file={}] [position={}] [wal_group={}]",
+              resetMs, currentPath.getName(), currentPositionOfEntry, walGroupId);
+          }
           return HasNext.YES;
         } catch (FileNotFoundException e) {
           // For now, this could happen only when reading meta wal for meta replicas.
@@ -259,7 +267,15 @@ class WALEntryStream implements Closeable {
     // a header EOF, but then while we test whether it is still being written, we have already
     // flushed the data out and we consider it is not being written, and then we just skip over
     // file, then we will lose the data written after opening...
+    long checkBeingWrittenStartNs = System.nanoTime();
     boolean beingWritten = walFileLengthProvider.getLogFileSizeIfBeingWritten(nextPath).isPresent();
+    long checkBeingWrittenMs = (System.nanoTime() - checkBeingWrittenStartNs) / 1_000_000;
+    if (LOG.isDebugEnabled() && checkBeingWrittenMs > 100) {
+      LOG.debug(
+        "REPL_TIMING: [stage=WAL_READ] [operation=check_file_being_written] [duration_ms={}] "
+          + "[file={}] [being_written={}] [wal_group={}]",
+        checkBeingWrittenMs, nextPath.getName(), beingWritten, walGroupId);
+    }
     LOG.debug("Creating new reader {}, startPosition={}, beingWritten={}", nextPath,
       currentPositionOfEntry, beingWritten);
     long startOpenNs = System.nanoTime();
