@@ -143,18 +143,42 @@ class ReplicationSourceWALReader extends Thread {
       try (WALEntryStream entryStream = new WALEntryStream(logQueue, fs, conf, currentPosition,
         source.getWALFileLengthProvider(), source.getSourceMetrics(), walGroupId)) {
         while (isReaderRunning()) { // loop here to keep reusing stream while we can
+          long loopIterationStartNs = System.nanoTime();
           if (!source.isPeerEnabled()) {
+            if (LOG.isDebugEnabled()) {
+              LOG.debug(
+                "REPL_TIMING: [stage=WAL_READ] [operation=peer_disabled_wait] "
+                  + "[sleep_ms={}] [peer={}] [wal_group={}]",
+                sleepForRetries, source.getPeerId(), walGroupId);
+            }
             waitingPeerEnabled.set(true);
             Threads.sleep(sleepForRetries);
             continue;
           } else {
             waitingPeerEnabled.set(false);
           }
-          if (!checkBufferQuota()) {
+          long quotaCheckStartNs = System.nanoTime();
+          boolean hasQuota = checkBufferQuota();
+          long quotaCheckMs = (System.nanoTime() - quotaCheckStartNs) / 1_000_000;
+          if (LOG.isDebugEnabled() && quotaCheckMs > 50) {
+            LOG.debug(
+              "REPL_TIMING: [stage=WAL_READ] [operation=buffer_quota_check] [duration_ms={}] "
+                + "[has_quota={}] [peer={}] [wal_group={}]",
+              quotaCheckMs, hasQuota, source.getPeerId(), walGroupId);
+          }
+          if (!hasQuota) {
             continue;
           }
           Path currentPath = entryStream.getCurrentPath();
+          long hasNextStartNs = System.nanoTime();
           WALEntryStream.HasNext hasNext = entryStream.hasNext();
+          long hasNextMs = (System.nanoTime() - hasNextStartNs) / 1_000_000;
+          if (LOG.isDebugEnabled() && hasNextMs > 100) {
+            LOG.debug(
+              "REPL_TIMING: [stage=WAL_READ] [operation=has_next_check] [duration_ms={}] "
+                + "[result={}] [peer={}] [wal_group={}]",
+              hasNextMs, hasNext, source.getPeerId(), walGroupId);
+          }
           if (hasNext == WALEntryStream.HasNext.NO) {
             replicationDone();
             return;
@@ -162,11 +186,25 @@ class ReplicationSourceWALReader extends Thread {
           // first, check if we have switched a file, if so, we need to manually add an EOF entry
           // batch to the queue
           if (currentPath != null && switched(entryStream, currentPath)) {
+            long eofPutStartNs = System.nanoTime();
             entryBatchQueue.put(WALEntryBatch.endOfFile(currentPath));
+            long eofPutMs = (System.nanoTime() - eofPutStartNs) / 1_000_000;
+            if (LOG.isDebugEnabled() && eofPutMs > 50) {
+              LOG.debug(
+                "REPL_TIMING: [stage=WAL_READ] [operation=put_eof_batch] [duration_ms={}] "
+                  + "[file={}] [peer={}] [wal_group={}]",
+                eofPutMs, currentPath.getName(), source.getPeerId(), walGroupId);
+            }
             continue;
           }
           if (hasNext == WALEntryStream.HasNext.RETRY) {
             // sleep and retry
+            if (LOG.isDebugEnabled()) {
+              LOG.debug(
+                "REPL_TIMING: [stage=WAL_READ] [operation=retry_sleep] "
+                  + "[sleep_multiplier={}] [sleep_ms={}] [peer={}] [wal_group={}]",
+                sleepMultiplier, sleepForRetries * sleepMultiplier, source.getPeerId(), walGroupId);
+            }
             sleepMultiplier = sleep(sleepMultiplier);
             continue;
           }
@@ -198,6 +236,13 @@ class ReplicationSourceWALReader extends Thread {
             }
             successAddToQueue = true;
             sleepMultiplier = 1;
+            long loopIterationMs = (System.nanoTime() - loopIterationStartNs) / 1_000_000;
+            if (LOG.isDebugEnabled() && loopIterationMs > 200) {
+              LOG.debug(
+                "REPL_TIMING: [stage=WAL_READ] [operation=reader_loop_iteration] [duration_ms={}] "
+                  + "[entries_in_batch={}] [peer={}] [wal_group={}]",
+                loopIterationMs, batch.getNbEntries(), source.getPeerId(), walGroupId);
+            }
           } finally {
             if (!successAddToQueue) {
               // batch is not put to ReplicationSourceWALReader#entryBatchQueue,so we should

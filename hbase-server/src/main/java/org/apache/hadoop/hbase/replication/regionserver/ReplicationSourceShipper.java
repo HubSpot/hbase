@@ -119,8 +119,10 @@ public class ReplicationSourceShipper extends Thread {
               : entryBatch.getWalEntries().get(0).getKey().getSequenceId(),
             entryBatch.getWalEntries().size(), source.getPeerId(), walGroupId);
         }
-        LOG.debug("Shipper from source {} got entry batch from reader: {}", source.getQueueId(),
-          entryBatch);
+        if (LOG.isTraceEnabled()) {
+          LOG.trace("Shipper from source {} got entry batch from reader: {}", source.getQueueId(),
+            entryBatch);
+        }
         if (entryBatch == null) {
           continue;
         }
