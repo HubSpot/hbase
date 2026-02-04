@@ -88,10 +88,9 @@ public class SerialReplicationSourceWALReader extends ReplicationSourceWALReader
           if (LOG.isDebugEnabled() && canPushMs > 50) {
             LOG.debug(
               "REPL_TIMING: [stage=SERIAL_CHECK] [operation=can_push_check] [duration_ms={}] "
-                + "[result={}] [seq_id={}] [region={}] [peer={}]",
+                + "[result={}] [seq_id={}] [region={}]",
               canPushMs, canPush, entry.getKey().getSequenceId(),
-              Bytes.toString(CellUtil.cloneRow(firstCellInEntryBeforeFiltering)),
-              source.getPeerId());
+              Bytes.toString(CellUtil.cloneRow(firstCellInEntryBeforeFiltering)));
           }
           if (!canPush) {
             if (batch.getLastWalPosition() > positionBefore) {
@@ -104,10 +103,9 @@ public class SerialReplicationSourceWALReader extends ReplicationSourceWALReader
               if (LOG.isDebugEnabled()) {
                 LOG.debug(
                   "REPL_TIMING: [stage=SERIAL_CHECK] [operation=wait_until_can_push] [duration_ms={}] "
-                    + "[seq_id={}] [region={}] [peer={}]",
+                    + "[seq_id={}] [region={}]",
                   waitMs, entry.getKey().getSequenceId(),
-                  Bytes.toString(CellUtil.cloneRow(firstCellInEntryBeforeFiltering)),
-                  source.getPeerId());
+                  Bytes.toString(CellUtil.cloneRow(firstCellInEntryBeforeFiltering)));
               }
             }
           }
