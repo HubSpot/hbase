@@ -18,6 +18,7 @@
 package org.apache.hadoop.hbase.replication.regionserver;
 
 import static org.apache.hadoop.hbase.replication.ReplicationUtils.getAdaptiveTimeout;
+
 import java.io.IOException;
 import java.util.List;
 import org.apache.hadoop.conf.Configuration;
@@ -33,6 +34,7 @@ import org.apache.hadoop.hbase.wal.WALEdit;
 import org.apache.yetus.audience.InterfaceAudience;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
 import org.apache.hadoop.hbase.shaded.protobuf.generated.WALProtos.BulkLoadDescriptor;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.WALProtos.StoreDescriptor;
 
@@ -104,7 +106,19 @@ public class ReplicationSourceShipper extends Thread {
         continue;
       }
       try {
+        long pollStartNs = System.nanoTime();
         WALEntryBatch entryBatch = entryReader.poll(getEntriesTimeout);
+        long pollMs = (System.nanoTime() - pollStartNs) / 1_000_000;
+        if (entryBatch != null && LOG.isDebugEnabled() && pollMs > 50) {
+          LOG.debug(
+            "REPL_TIMING: [stage=QUEUE] [operation=poll_batch] [duration_ms={}] "
+              + "[batch_id={}] [entries={}] [peer={}] [wal_group={}]",
+            pollMs,
+            entryBatch.getWalEntries().isEmpty()
+              ? -1
+              : entryBatch.getWalEntries().get(0).getKey().getSequenceId(),
+            entryBatch.getWalEntries().size(), source.getPeerId(), walGroupId);
+        }
         LOG.debug("Shipper from source {} got entry batch from reader: {}", source.getQueueId(),
           entryBatch);
         if (entryBatch == null) {
@@ -152,8 +166,21 @@ public class ReplicationSourceShipper extends Thread {
     int currentSize = (int) entryBatch.getHeapSize();
     source.getSourceMetrics()
       .setTimeStampNextToReplicate(entries.get(entries.size() - 1).getKey().getWriteTime());
+    long shipStartNs = System.nanoTime();
+    if (LOG.isDebugEnabled()) {
+      long oldestAge = System.currentTimeMillis() - entries.get(0).getKey().getWriteTime();
+      if (oldestAge > 5000) {
+        long newestAge =
+          System.currentTimeMillis() - entries.get(entries.size() - 1).getKey().getWriteTime();
+        LOG.debug(
+          "REPL_TIMING: [stage=SHIP] [operation=batch_age] "
+            + "[oldest_entry_age_ms={}] [newest_entry_age_ms={}] [batch_id={}] [peer={}]",
+          oldestAge, newestAge, entries.get(0).getKey().getSequenceId(), source.getPeerId());
+      }
+    }
     while (isActive()) {
       try {
+        long throttleStartNs = System.nanoTime();
         try {
           source.tryThrottle(currentSize);
         } catch (InterruptedException e) {
@@ -162,6 +189,11 @@ public class ReplicationSourceShipper extends Thread {
           // current thread might be interrupted to terminate
           // directly go back to while() for confirm this
           continue;
+        }
+        long throttleMs = (System.nanoTime() - throttleStartNs) / 1_000_000;
+        if (throttleMs > 0 && LOG.isDebugEnabled()) {
+          LOG.debug("REPL_TIMING: [stage=SHIP] [operation=throttle] [duration_ms={}] "
+            + "[batch_size_bytes={}] [peer={}]", throttleMs, currentSize, source.getPeerId());
         }
         // create replicateContext here, so the entries can be GC'd upon return from this call
         // stack
@@ -175,6 +207,14 @@ public class ReplicationSourceShipper extends Thread {
         // send the edits to the endpoint. Will block until the edits are shipped and acknowledged
         boolean replicated = source.getReplicationEndpoint().replicate(replicateContext);
         long endTimeNs = System.nanoTime();
+        long replicateMs = (endTimeNs - startTimeNs) / 1_000_000;
+        if (LOG.isDebugEnabled() && replicateMs > 100) {
+          LOG.debug(
+            "REPL_TIMING: [stage=ENDPOINT] [operation=replicate_rpc] [duration_ms={}] "
+              + "[batch_id={}] [entries={}] [operations={}] [peer={}] [timeout={}]",
+            replicateMs, entries.get(0).getKey().getSequenceId(), entries.size(),
+            entryBatch.getNbOperations(), source.getPeerId(), replicateContext.getTimeout());
+        }
 
         if (!replicated) {
           continue;
@@ -187,7 +227,13 @@ public class ReplicationSourceShipper extends Thread {
           LOG.trace("shipped entry {}: ", entry);
         }
         // Log and clean up WAL logs
+        long updatePosStartNs = System.nanoTime();
         updateLogPosition(entryBatch);
+        long updatePosMs = (System.nanoTime() - updatePosStartNs) / 1_000_000;
+        if (LOG.isDebugEnabled() && updatePosMs > 50) {
+          LOG.debug("REPL_TIMING: [stage=SHIP] [operation=update_position] [duration_ms={}] "
+            + "[peer={}] [wal_group={}]", updatePosMs, source.getPeerId(), walGroupId);
+        }
 
         // offsets totalBufferUsed by deducting shipped batchSize (excludes bulk load size)
         // this sizeExcludeBulkLoad has to use same calculation that when calling
@@ -201,6 +247,13 @@ public class ReplicationSourceShipper extends Thread {
           entries.get(entries.size() - 1).getKey().getWriteTime(), walGroupId);
         source.getSourceMetrics().updateTableLevelMetrics(entryBatch.getWalEntriesWithSize());
 
+        long shipMs = (System.nanoTime() - shipStartNs) / 1_000_000;
+        if (LOG.isDebugEnabled() && shipMs > 200) {
+          LOG.debug("REPL_TIMING: [stage=SHIP] [operation=ship_batch_total] [duration_ms={}] "
+            + "[batch_id={}] [entries={}] [operations={}] [batch_size_bytes={}] [peer={}] [wal_group={}]",
+            shipMs, entries.get(0).getKey().getSequenceId(), entries.size(),
+            entryBatch.getNbOperations(), currentSize, source.getPeerId(), walGroupId);
+        }
         if (LOG.isTraceEnabled()) {
           LOG.debug("Replicated {} entries or {} operations in {} ms", entries.size(),
             entryBatch.getNbOperations(), (endTimeNs - startTimeNs) / 1000000);
@@ -210,6 +263,13 @@ public class ReplicationSourceShipper extends Thread {
         source.getSourceMetrics().incrementFailedBatches();
         LOG.warn("{} threw unknown exception:",
           source.getReplicationEndpoint().getClass().getName(), ex);
+        if (LOG.isDebugEnabled()) {
+          LOG.debug(
+            "REPL_TIMING: [stage=SHIP] [operation=retry_backoff] "
+              + "[sleep_multiplier={}] [sleep_ms={}] [peer={}] [error={}]",
+            sleepMultiplier, source.getSleepForRetries() * sleepMultiplier, source.getPeerId(),
+            ex.getClass().getSimpleName());
+        }
         if (sleepForRetries("ReplicationEndpoint threw exception", sleepMultiplier)) {
           sleepMultiplier++;
         }

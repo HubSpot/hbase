@@ -184,8 +184,16 @@ class SerialReplicationChecker {
   private boolean canPush(Entry entry, byte[] row) throws IOException {
     String encodedNameAsString = Bytes.toString(entry.getKey().getEncodedRegionName());
     long seqId = entry.getKey().getSequenceId();
+    long metaStartNs = System.nanoTime();
     ReplicationBarrierResult barrierResult = MetaTableAccessor.getReplicationBarrierResult(conn,
       entry.getKey().getTableName(), row, entry.getKey().getEncodedRegionName());
+    long metaMs = (System.nanoTime() - metaStartNs) / 1_000_000;
+    if (LOG.isDebugEnabled() && metaMs > 100) {
+      LOG.debug(
+        "REPL_TIMING: [stage=SERIAL_CHECK] [operation=get_replication_barrier] [duration_ms={}] "
+          + "[region={}]",
+        metaMs, Bytes.toString(row));
+    }
     LOG.debug("Replication barrier for {}: {}", entry, barrierResult);
     long[] barriers = barrierResult.getBarriers();
     int index = Arrays.binarySearch(barriers, seqId);

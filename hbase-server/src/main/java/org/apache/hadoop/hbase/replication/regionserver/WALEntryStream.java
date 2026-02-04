@@ -29,6 +29,7 @@ import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hbase.regionserver.wal.AbstractProtobufWALReader;
 import org.apache.hadoop.hbase.regionserver.wal.WALHeaderEOFException;
+import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.LeaseNotRecoveredException;
 import org.apache.hadoop.hbase.util.Pair;
 import org.apache.hadoop.hbase.wal.AbstractFSWALProvider;
@@ -72,6 +73,8 @@ class WALEntryStream implements Closeable {
   // we should be able to skip empty WAL files, but for safety, we still provide this config
   // see HBASE-18137 for more details
   private boolean eofAutoRecovery;
+
+  private int fileOpenCount = 0;
 
   /**
    * Create an entry stream over the given queue at the given start position
@@ -259,11 +262,32 @@ class WALEntryStream implements Closeable {
     boolean beingWritten = walFileLengthProvider.getLogFileSizeIfBeingWritten(nextPath).isPresent();
     LOG.debug("Creating new reader {}, startPosition={}, beingWritten={}", nextPath,
       currentPositionOfEntry, beingWritten);
+    long startOpenNs = System.nanoTime();
     try {
       reader = WALFactory.createTailingReader(fs, nextPath, conf,
         currentPositionOfEntry > 0 ? currentPositionOfEntry : -1);
+      long durationMs = (System.nanoTime() - startOpenNs) / 1_000_000;
+      if (LOG.isDebugEnabled() && durationMs > 100) {
+        LOG.debug(
+          "REPL_TIMING: [stage=WAL_READ] [operation=open_wal_file] [duration_ms={}] "
+            + "[file={}] [position={}] [wal_group={}]",
+          durationMs, nextPath, currentPositionOfEntry, walGroupId);
+      }
+      fileOpenCount++;
+      if (fileOpenCount % 10 == 0 && LOG.isDebugEnabled()) {
+        LOG.debug(
+          "REPL_TIMING: [stage=WAL_READ] [operation=file_open_count] [count={}] [wal_group={}]",
+          fileOpenCount, walGroupId);
+      }
       return HasNext.YES;
     } catch (WALHeaderEOFException e) {
+      long durationMs = (System.nanoTime() - startOpenNs) / 1_000_000;
+      if (LOG.isDebugEnabled()) {
+        LOG.debug(
+          "REPL_TIMING: [stage=WAL_READ] [operation=open_wal_file_failed] [duration_ms={}] "
+            + "[error=WALHeaderEOFException] [file={}] [wal_group={}]",
+          durationMs, nextPath, walGroupId);
+      }
       if (!eofAutoRecovery) {
         // if we do not enable EOF auto recovery, just let the upper layer retry
         // the replication will be stuck usually, and need to be fixed manually
@@ -284,11 +308,25 @@ class WALEntryStream implements Closeable {
         return HasNext.RETRY_IMMEDIATELY;
       }
     } catch (LeaseNotRecoveredException e) {
+      long durationMs = (System.nanoTime() - startOpenNs) / 1_000_000;
+      if (LOG.isDebugEnabled()) {
+        LOG.debug(
+          "REPL_TIMING: [stage=WAL_READ] [operation=open_wal_file_failed] [duration_ms={}] "
+            + "[error=LeaseNotRecoveredException] [file={}] [wal_group={}]",
+          durationMs, nextPath, walGroupId);
+      }
       // HBASE-15019 the WAL was not closed due to some hiccup.
       LOG.warn("Try to recover the WAL lease " + nextPath, e);
       AbstractFSWALProvider.recoverLease(conf, nextPath);
       return HasNext.RETRY;
     } catch (IOException | NullPointerException e) {
+      long durationMs = (System.nanoTime() - startOpenNs) / 1_000_000;
+      if (LOG.isDebugEnabled()) {
+        LOG.debug(
+          "REPL_TIMING: [stage=WAL_READ] [operation=open_wal_file_failed] [duration_ms={}] "
+            + "[error={}] [file={}] [wal_group={}]",
+          durationMs, e.getClass().getSimpleName(), nextPath, walGroupId);
+      }
       // For why we need to catch NPE here, see HDFS-4380 for more details
       LOG.warn("Failed to open WAL reader for path: {}", nextPath, e);
       return HasNext.RETRY;
@@ -340,6 +378,7 @@ class WALEntryStream implements Closeable {
       return prepared;
     }
 
+    long startAdvanceNs = System.nanoTime();
     Pair<WALTailingReader.State, Boolean> pair = readNextEntryAndRecordReaderPosition();
     state = pair.getFirst();
     boolean beingWritten = pair.getSecond();
@@ -350,6 +389,15 @@ class WALEntryStream implements Closeable {
     switch (state) {
       case NORMAL:
         // everything is fine, just return
+        long durationMs = (System.nanoTime() - startAdvanceNs) / 1_000_000;
+        if (LOG.isDebugEnabled() && currentEntry != null && durationMs > 50) {
+          LOG.debug(
+            "REPL_TIMING: [stage=WAL_READ] [operation=read_entry] [duration_ms={}] "
+              + "[seq_id={}] [region={}] [entry_size={}]",
+            durationMs, currentEntry.getKey().getSequenceId(),
+            Bytes.toString(currentEntry.getKey().getEncodedRegionName()),
+            currentEntry.getEdit().heapSize());
+        }
         return HasNext.YES;
       case EOF_WITH_TRAILER:
         // in readNextEntryAndRecordReaderPosition, we will acquire rollWriteLock, and we can only

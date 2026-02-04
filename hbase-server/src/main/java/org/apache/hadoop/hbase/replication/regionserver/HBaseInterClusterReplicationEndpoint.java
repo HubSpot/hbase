@@ -527,7 +527,13 @@ public class HBaseInterClusterReplicationEndpoint extends HBaseReplicationEndpoi
       return false;
     }
 
+    long createBatchesStartNs = System.nanoTime();
     List<List<Entry>> batches = createBatches(replicateContext.getEntries());
+    long createBatchesMs = (System.nanoTime() - createBatchesStartNs) / 1_000_000;
+    if (LOG.isDebugEnabled() && createBatchesMs > 50) {
+      LOG.debug("REPL_TIMING: [stage=ENDPOINT] [operation=create_batches] [duration_ms={}] "
+        + "[num_batches={}] [peer={}]", createBatchesMs, batches.size(), ctx.getPeerId());
+    }
     while (this.isRunning() && !exec.isShutdown()) {
       if (!isPeerEnabled()) {
         if (sleepForRetries("Replication is disabled", sleepMultiplier)) {
@@ -636,8 +642,16 @@ public class HBaseInterClusterReplicationEndpoint extends HBaseReplicationEndpoi
       sinkPeer = replicationSinkMgr.getReplicationSink();
       BlockingInterface rrs = sinkPeer.getRegionServer();
       try {
+        long rpcStartNs = System.nanoTime();
         ReplicationProtbufUtil.replicateWALEntry(rrs, entries.toArray(new Entry[entries.size()]),
           replicationClusterId, baseNamespaceDir, hfileArchiveDir, timeout);
+        long rpcMs = (System.nanoTime() - rpcStartNs) / 1_000_000;
+        if (LOG.isDebugEnabled() && rpcMs > 100) {
+          LOG.debug(
+            "REPL_TIMING: [stage=ENDPOINT] [operation=rpc_call] [duration_ms={}] "
+              + "[entries={}] [target_server={}] [peer={}]",
+            rpcMs, entries.size(), sinkPeer.getServerName(), ctx.getPeerId());
+        }
         if (LOG.isTraceEnabled()) {
           LOG.trace("{} Completed replicating batch {}", logPeerId(), entriesHashCode);
         }

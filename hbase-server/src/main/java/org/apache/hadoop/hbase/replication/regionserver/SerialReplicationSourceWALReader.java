@@ -22,6 +22,7 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hbase.Cell;
+import org.apache.hadoop.hbase.CellUtil;
 import org.apache.hadoop.hbase.replication.WALEntryFilter;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.wal.WAL.Entry;
@@ -81,12 +82,33 @@ public class SerialReplicationSourceWALReader extends ReplicationSourceWALReader
       if (entry != null) {
         int sleepMultiplier = 1;
         try {
-          if (!checker.canPush(entry, firstCellInEntryBeforeFiltering)) {
+          long canPushStartNs = System.nanoTime();
+          boolean canPush = checker.canPush(entry, firstCellInEntryBeforeFiltering);
+          long canPushMs = (System.nanoTime() - canPushStartNs) / 1_000_000;
+          if (LOG.isDebugEnabled() && canPushMs > 50) {
+            LOG.debug(
+              "REPL_TIMING: [stage=SERIAL_CHECK] [operation=can_push_check] [duration_ms={}] "
+                + "[result={}] [seq_id={}] [region={}] [peer={}]",
+              canPushMs, canPush, entry.getKey().getSequenceId(),
+              Bytes.toString(CellUtil.cloneRow(firstCellInEntryBeforeFiltering)),
+              source.getPeerId());
+          }
+          if (!canPush) {
             if (batch.getLastWalPosition() > positionBefore) {
               // we have something that can push, break
               break;
             } else {
+              long waitStartNs = System.nanoTime();
               checker.waitUntilCanPush(entry, firstCellInEntryBeforeFiltering);
+              long waitMs = (System.nanoTime() - waitStartNs) / 1_000_000;
+              if (LOG.isDebugEnabled()) {
+                LOG.debug(
+                  "REPL_TIMING: [stage=SERIAL_CHECK] [operation=wait_until_can_push] [duration_ms={}] "
+                    + "[seq_id={}] [region={}] [peer={}]",
+                  waitMs, entry.getKey().getSequenceId(),
+                  Bytes.toString(CellUtil.cloneRow(firstCellInEntryBeforeFiltering)),
+                  source.getPeerId());
+              }
             }
           }
         } catch (IOException e) {

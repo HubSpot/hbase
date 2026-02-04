@@ -31,6 +31,7 @@ import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.CellUtil;
 import org.apache.hadoop.hbase.KeyValue;
 import org.apache.hadoop.hbase.replication.WALEntryFilter;
+import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.Pair;
 import org.apache.hadoop.hbase.util.Threads;
 import org.apache.hadoop.hbase.wal.WAL.Entry;
@@ -39,7 +40,9 @@ import org.apache.yetus.audience.InterfaceAudience;
 import org.apache.yetus.audience.InterfaceStability;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
 import org.apache.hbase.thirdparty.com.google.common.base.Preconditions;
+
 import org.apache.hadoop.hbase.shaded.protobuf.generated.WALProtos;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.WALProtos.BulkLoadDescriptor;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.WALProtos.StoreDescriptor;
@@ -180,7 +183,19 @@ class ReplicationSourceWALReader extends Thread {
             // need to propagate the batch even it has no entries since it may carry the last
             // sequence id information for serial replication.
             LOG.debug("Read {} WAL entries eligible for replication", batch.getNbEntries());
+            long queuePutStartNs = System.nanoTime();
             entryBatchQueue.put(batch);
+            long queuePutMs = (System.nanoTime() - queuePutStartNs) / 1_000_000;
+            if (LOG.isDebugEnabled() && queuePutMs > 50) {
+              LOG.debug(
+                "REPL_TIMING: [stage=QUEUE] [operation=put_batch] [duration_ms={}] "
+                  + "[batch_id={}] [entries={}] [batch_size_bytes={}] [peer={}] [wal_group={}]",
+                queuePutMs,
+                batch.getWalEntries().isEmpty()
+                  ? -1
+                  : batch.getWalEntries().get(0).getKey().getSequenceId(),
+                batch.getWalEntries().size(), batch.getHeapSize(), source.getPeerId(), walGroupId);
+            }
             successAddToQueue = true;
             sleepMultiplier = 1;
           } finally {
@@ -237,12 +252,15 @@ class ReplicationSourceWALReader extends Thread {
   // we do not want to loss the existing entries in the batch
   protected void readWALEntries(WALEntryStream entryStream, WALEntryBatch batch)
     throws InterruptedException {
+    long batchStartNs = System.nanoTime();
+    int entriesRead = 0;
     Path currentPath = entryStream.getCurrentPath();
     for (;;) {
       Entry entry = entryStream.next();
       batch.setLastWalPosition(entryStream.getPosition());
       entry = filterEntry(entry);
       if (entry != null) {
+        entriesRead++;
         if (addEntryToBatch(batch, entry)) {
           break;
         }
@@ -261,6 +279,13 @@ class ReplicationSourceWALReader extends Thread {
         break;
       }
     }
+    long durationMs = (System.nanoTime() - batchStartNs) / 1_000_000;
+    if (LOG.isDebugEnabled() && durationMs > 100) {
+      LOG.debug(
+        "REPL_TIMING: [stage=BATCH] [operation=read_wal_entries] [duration_ms={}] "
+          + "[entries_read={}] [batch_size_bytes={}] [peer={}] [wal_group={}]",
+        durationMs, entriesRead, batch.getHeapSize(), source.getPeerId(), walGroupId);
+    }
   }
 
   public Path getCurrentPath() {
@@ -277,6 +302,13 @@ class ReplicationSourceWALReader extends Thread {
   private boolean checkBufferQuota() {
     // try not to go over total quota
     if (!this.getSourceManager().checkBufferQuota(this.source.getPeerId())) {
+      if (LOG.isDebugEnabled()) {
+        LOG.debug(
+          "REPL_TIMING: [stage=BATCH] [operation=buffer_quota_wait] "
+            + "[total_buffer_used={}] [total_buffer_limit={}] [peer={}]",
+          getSourceManager().getTotalBufferUsed(), getSourceManager().getTotalBufferLimit(),
+          source.getPeerId());
+      }
       Threads.sleep(sleepForRetries);
       return false;
     }
@@ -288,6 +320,7 @@ class ReplicationSourceWALReader extends Thread {
   }
 
   protected final Entry filterEntry(Entry entry) {
+    long startFilterNs = System.nanoTime();
     // Always replicate if this edit is Replication Marker edit.
     if (entry != null && WALEdit.isReplicationMarkerEdit(entry.getEdit())) {
       return entry;
@@ -296,6 +329,15 @@ class ReplicationSourceWALReader extends Thread {
     if (entry != null && (filtered == null || filtered.getEdit().size() == 0)) {
       LOG.trace("Filtered entry for replication: {}", entry);
       source.getSourceMetrics().incrLogEditsFiltered();
+    }
+    long durationMs = (System.nanoTime() - startFilterNs) / 1_000_000;
+    if (LOG.isDebugEnabled() && entry != null && durationMs > 10) {
+      LOG.debug(
+        "REPL_TIMING: [stage=FILTER] [operation=filter_entry] [duration_ms={}] "
+          + "[seq_id={}] [region={}] [result={}] [peer={}]",
+        durationMs, entry.getKey().getSequenceId(),
+        Bytes.toString(entry.getKey().getEncodedRegionName()),
+        filtered != null ? "PASSED" : "FILTERED", source.getPeerId());
     }
     return filtered;
   }
