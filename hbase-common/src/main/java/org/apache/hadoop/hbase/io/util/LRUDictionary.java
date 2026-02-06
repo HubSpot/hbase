@@ -18,6 +18,7 @@
 package org.apache.hadoop.hbase.io.util;
 
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.HashMap;
 import org.apache.hadoop.hbase.util.ByteBufferUtils;
 import org.apache.hadoop.hbase.util.Bytes;
@@ -72,6 +73,21 @@ public class LRUDictionary implements Dictionary {
     backingStore.clear();
   }
 
+  @Override
+  public void savepoint() {
+    backingStore.savepoint();
+  }
+
+  @Override
+  public void rollback() {
+    backingStore.rollback();
+  }
+
+  @Override
+  public void releaseSavepoint() {
+    backingStore.releaseSavepoint();
+  }
+
   /*
    * Internal class used to implement LRU eviction and dual lookup (by key and value). This is not
    * thread safe. Don't use in multi-threaded applications.
@@ -86,6 +102,9 @@ public class LRUDictionary implements Dictionary {
     private HashMap<Node, Short> nodeToIndex = new HashMap<>();
     private Node[] indexToNode;
     private int initSize = 0;
+
+    private ArrayList<UndoEntry> undoLog;
+    private boolean recording = false;
 
     public BidirectionalLRUMap(int initialSize) {
       initSize = initialSize;
@@ -106,7 +125,6 @@ public class LRUDictionary implements Dictionary {
 
     private short putInternal(byte[] stored) {
       if (currSize < initSize) {
-        // There is space to add without evicting.
         if (indexToNode[currSize] == null) {
           indexToNode[currSize] = new ByteArrayBackedNode();
         }
@@ -114,13 +132,30 @@ public class LRUDictionary implements Dictionary {
         setHead(indexToNode[currSize]);
         short ret = (short) currSize++;
         nodeToIndex.put(indexToNode[ret], ret);
+        if (recording) {
+          undoLog.add(new UndoPutNoEviction(ret));
+        }
         return ret;
       } else {
+        byte[] oldContents = null;
+        int oldOffset = 0;
+        int oldLength = 0;
+        Node prevBeforeMove = null;
+        if (recording) {
+          oldContents = tail.getContents();
+          oldOffset = tail.offset;
+          oldLength = tail.length;
+          prevBeforeMove = tail.prev;
+        }
         short s = nodeToIndex.remove(tail);
-        tail.setContents(stored, 0, stored.length);
-        // we need to rehash this.
-        nodeToIndex.put(tail, s);
-        moveToHead(tail);
+        Node evictedNode = tail;
+        evictedNode.setContents(stored, 0, stored.length);
+        nodeToIndex.put(evictedNode, s);
+        moveToHead(evictedNode, false);
+        if (recording) {
+          undoLog.add(
+            new UndoPutEviction(s, oldContents, oldOffset, oldLength, evictedNode, prevBeforeMove));
+        }
         return s;
       }
     }
@@ -130,7 +165,7 @@ public class LRUDictionary implements Dictionary {
       final Node comparisonNode = new ByteArrayBackedNode();
       comparisonNode.setContents(array, offset, length);
       if ((s = nodeToIndex.get(comparisonNode)) != null) {
-        moveToHead(indexToNode[s]);
+        moveToHead(indexToNode[s], true);
         return s;
       } else {
         return -1;
@@ -142,7 +177,7 @@ public class LRUDictionary implements Dictionary {
       final ByteBufferBackedNode comparisonNode = new ByteBufferBackedNode();
       comparisonNode.setContents(buf, offset, length);
       if ((s = nodeToIndex.get(comparisonNode)) != null) {
-        moveToHead(indexToNode[s]);
+        moveToHead(indexToNode[s], true);
         return s;
       } else {
         return -1;
@@ -151,28 +186,25 @@ public class LRUDictionary implements Dictionary {
 
     private byte[] get(short idx) {
       Preconditions.checkElementIndex(idx, currSize);
-      moveToHead(indexToNode[idx]);
+      moveToHead(indexToNode[idx], true);
       return indexToNode[idx].getContents();
     }
 
-    private void moveToHead(Node n) {
+    private void moveToHead(Node n, boolean record) {
       if (head == n) {
-        // no-op -- it's already the head.
         return;
       }
-      // At this point we definitely have prev, since it's not the head.
+      if (record && recording) {
+        undoLog.add(new UndoMoveToHead(n, n.prev, n.next));
+      }
       assert n.prev != null;
-      // Unlink prev.
       n.prev.next = n.next;
-
-      // Unlink next
       if (n.next != null) {
         n.next.prev = n.prev;
       } else {
         assert n == tail;
         tail = n.prev;
       }
-      // Node is now removed from the list. Re-add it at the head.
       setHead(n);
     }
 
@@ -203,6 +235,165 @@ public class LRUDictionary implements Dictionary {
       nodeToIndex.clear();
       tail = null;
       head = null;
+    }
+
+    void savepoint() {
+      recording = true;
+      if (undoLog == null) {
+        undoLog = new ArrayList<>(64);
+      } else {
+        undoLog.clear();
+      }
+    }
+
+    void rollback() {
+      if (undoLog != null) {
+        for (int i = undoLog.size() - 1; i >= 0; i--) {
+          undoLog.get(i).undo(this);
+        }
+        undoLog.clear();
+      }
+      recording = false;
+    }
+
+    void releaseSavepoint() {
+      if (undoLog != null) {
+        undoLog.clear();
+      }
+      recording = false;
+    }
+
+    private interface UndoEntry {
+      void undo(BidirectionalLRUMap map);
+    }
+
+    private static class UndoPutNoEviction implements UndoEntry {
+      private final short index;
+
+      UndoPutNoEviction(short index) {
+        this.index = index;
+      }
+
+      @Override
+      public void undo(BidirectionalLRUMap map) {
+        Node node = map.indexToNode[index];
+        map.nodeToIndex.remove(node);
+        if (node == map.head) {
+          map.head = node.next;
+          if (map.head != null) {
+            map.head.prev = null;
+          }
+        } else {
+          if (node.prev != null) {
+            node.prev.next = node.next;
+          }
+          if (node.next != null) {
+            node.next.prev = node.prev;
+          }
+        }
+        if (node == map.tail) {
+          map.tail = node.prev;
+        }
+        node.next = null;
+        node.prev = null;
+        node.resetContents();
+        map.currSize--;
+      }
+    }
+
+    private static class UndoPutEviction implements UndoEntry {
+      private final short index;
+      private final byte[] oldContents;
+      private final int oldOffset;
+      private final int oldLength;
+      private final Node node;
+      private final Node prevBeforeMove;
+
+      UndoPutEviction(short index, byte[] oldContents, int oldOffset, int oldLength, Node node,
+        Node prevBeforeMove) {
+        this.index = index;
+        this.oldContents = oldContents;
+        this.oldOffset = oldOffset;
+        this.oldLength = oldLength;
+        this.node = node;
+        this.prevBeforeMove = prevBeforeMove;
+      }
+
+      @Override
+      public void undo(BidirectionalLRUMap map) {
+        map.nodeToIndex.remove(node);
+        node.setContents(oldContents, oldOffset, oldLength);
+        map.nodeToIndex.put(node, index);
+
+        if (node == map.head) {
+          map.head = node.next;
+          if (map.head != null) {
+            map.head.prev = null;
+          }
+        } else {
+          if (node.prev != null) {
+            node.prev.next = node.next;
+          }
+          if (node.next != null) {
+            node.next.prev = node.prev;
+          }
+        }
+
+        node.next = null;
+        if (prevBeforeMove != null) {
+          node.prev = prevBeforeMove;
+          prevBeforeMove.next = node;
+        } else {
+          node.prev = null;
+          map.head = node;
+        }
+        map.tail = node;
+      }
+    }
+
+    private static class UndoMoveToHead implements UndoEntry {
+      private final Node node;
+      private final Node savedPrev;
+      private final Node savedNext;
+
+      UndoMoveToHead(Node node, Node savedPrev, Node savedNext) {
+        this.node = node;
+        this.savedPrev = savedPrev;
+        this.savedNext = savedNext;
+      }
+
+      @Override
+      public void undo(BidirectionalLRUMap map) {
+        if (node == map.head) {
+          map.head = node.next;
+          if (map.head != null) {
+            map.head.prev = null;
+          }
+        } else {
+          if (node.prev != null) {
+            node.prev.next = node.next;
+          }
+          if (node.next != null) {
+            node.next.prev = node.prev;
+          }
+        }
+        if (node == map.tail) {
+          map.tail = node.prev;
+        }
+
+        node.prev = savedPrev;
+        node.next = savedNext;
+        if (savedPrev != null) {
+          savedPrev.next = node;
+        } else {
+          map.head = node;
+        }
+        if (savedNext != null) {
+          savedNext.prev = node;
+        } else {
+          map.tail = node;
+        }
+      }
     }
 
     private static abstract class Node {

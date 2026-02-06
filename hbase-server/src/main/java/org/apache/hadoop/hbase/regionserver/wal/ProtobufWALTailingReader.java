@@ -253,11 +253,38 @@ public class ProtobufWALTailingReader extends AbstractProtobufWALReader
       // calculate the remaining bytes we can read and set
       delegatingInput.setDelegate(ByteStreams.limit(inputStream, limit - originalPosition));
     }
+    if (compressionCtx != null) {
+      compressionCtx.savepoint();
+    }
     ReadWALKeyResult readKeyResult = readWALKey(originalPosition);
     if (readKeyResult.state != State.NORMAL) {
-      return readKeyResult.state.getResult();
+      if (compressionCtx != null) {
+        compressionCtx.rollback();
+      }
+      return downgradeCompressionReset(readKeyResult.state).getResult();
     }
-    return readWALEdit(readKeyResult.entry, readKeyResult.followingKvCount);
+    Result editResult = readWALEdit(readKeyResult.entry, readKeyResult.followingKvCount);
+    if (editResult.getState() != State.NORMAL) {
+      if (compressionCtx != null) {
+        compressionCtx.rollback();
+      }
+      return downgradeCompressionReset(editResult.getState()).getResult();
+    }
+    if (compressionCtx != null) {
+      compressionCtx.releaseSavepoint();
+    }
+    return editResult;
+  }
+
+  private State downgradeCompressionReset(State state) {
+    switch (state) {
+      case EOF_AND_RESET_COMPRESSION:
+        return State.EOF_AND_RESET;
+      case ERROR_AND_RESET_COMPRESSION:
+        return State.ERROR_AND_RESET;
+      default:
+        return state;
+    }
   }
 
   private void skipHeader(FSDataInputStream stream) throws IOException {

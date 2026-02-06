@@ -52,6 +52,18 @@ public class TagCompressionContext {
     tagDict.clear();
   }
 
+  public void savepoint() {
+    tagDict.savepoint();
+  }
+
+  public void rollback() {
+    tagDict.rollback();
+  }
+
+  public void releaseSavepoint() {
+    tagDict.releaseSavepoint();
+  }
+
   /**
    * Compress tags one by one and writes to the OutputStream.
    * @param out    Stream to which the compressed tags to be written

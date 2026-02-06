@@ -151,6 +151,144 @@ public class TestLRUDictionary {
     }
   }
 
+  @Test
+  public void testSavepointRollbackUndoesAdd() {
+    byte[] existingEntry = Bytes.toBytes("before-savepoint");
+    testee.addEntry(existingEntry, 0, existingEntry.length);
+    short existingIdx = testee.findEntry(existingEntry, 0, existingEntry.length);
+    assertTrue(existingIdx != -1);
+
+    testee.savepoint();
+
+    byte[] newEntry = Bytes.toBytes("after-savepoint");
+    testee.addEntry(newEntry, 0, newEntry.length);
+    short newIdx = testee.findEntry(newEntry, 0, newEntry.length);
+    assertTrue(newIdx != -1);
+
+    testee.rollback();
+
+    assertTrue(testee.findEntry(existingEntry, 0, existingEntry.length) != -1);
+    assertTrue(Arrays.equals(existingEntry, testee.getEntry(existingIdx)));
+
+    assertEquals(-1, testee.findEntry(newEntry, 0, newEntry.length));
+  }
+
+  @Test
+  public void testSavepointRollbackUndoesGetReorder() {
+    byte[] entry1 = Bytes.toBytes("entry1");
+    byte[] entry2 = Bytes.toBytes("entry2");
+    byte[] entry3 = Bytes.toBytes("entry3");
+
+    testee.addEntry(entry1, 0, entry1.length);
+    testee.addEntry(entry2, 0, entry2.length);
+    testee.addEntry(entry3, 0, entry3.length);
+
+    short idx1 = testee.findEntry(entry1, 0, entry1.length);
+    short idx2 = testee.findEntry(entry2, 0, entry2.length);
+    short idx3 = testee.findEntry(entry3, 0, entry3.length);
+
+    testee.savepoint();
+
+    testee.getEntry(idx1);
+
+    testee.rollback();
+
+    assertTrue(Arrays.equals(entry1, testee.getEntry(idx1)));
+    assertTrue(Arrays.equals(entry2, testee.getEntry(idx2)));
+    assertTrue(Arrays.equals(entry3, testee.getEntry(idx3)));
+  }
+
+  @Test
+  public void testSavepointRollbackWithEviction() {
+    LRUDictionary smallDict = new LRUDictionary();
+    smallDict.init(3);
+
+    byte[] a = Bytes.toBytes("aaa");
+    byte[] b = Bytes.toBytes("bbb");
+    byte[] c = Bytes.toBytes("ccc");
+
+    smallDict.addEntry(a, 0, a.length);
+    smallDict.addEntry(b, 0, b.length);
+    smallDict.addEntry(c, 0, c.length);
+
+    short idxA = smallDict.findEntry(a, 0, a.length);
+    short idxB = smallDict.findEntry(b, 0, b.length);
+    short idxC = smallDict.findEntry(c, 0, c.length);
+    assertTrue(idxA != -1);
+    assertTrue(idxB != -1);
+    assertTrue(idxC != -1);
+
+    smallDict.savepoint();
+
+    byte[] d = Bytes.toBytes("ddd");
+    smallDict.addEntry(d, 0, d.length);
+
+    smallDict.rollback();
+
+    assertTrue(Arrays.equals(a, smallDict.getEntry(idxA)));
+    assertTrue(Arrays.equals(b, smallDict.getEntry(idxB)));
+    assertTrue(Arrays.equals(c, smallDict.getEntry(idxC)));
+    assertEquals(-1, smallDict.findEntry(d, 0, d.length));
+  }
+
+  @Test
+  public void testSavepointRelease() {
+    byte[] entry = Bytes.toBytes("persist-me");
+    testee.savepoint();
+    testee.addEntry(entry, 0, entry.length);
+    testee.releaseSavepoint();
+
+    short idx = testee.findEntry(entry, 0, entry.length);
+    assertTrue(idx != -1);
+    assertTrue(Arrays.equals(entry, testee.getEntry(idx)));
+  }
+
+  @Test
+  public void testSavepointRollbackEmpty() {
+    byte[] entry = Bytes.toBytes("existing");
+    testee.addEntry(entry, 0, entry.length);
+
+    testee.savepoint();
+    testee.rollback();
+
+    short idx = testee.findEntry(entry, 0, entry.length);
+    assertTrue(idx != -1);
+    assertTrue(Arrays.equals(entry, testee.getEntry(idx)));
+  }
+
+  @Test
+  public void testSavepointRollbackInterleavedOps() {
+    LRUDictionary smallDict = new LRUDictionary();
+    smallDict.init(4);
+
+    byte[] a = Bytes.toBytes("aaa");
+    byte[] b = Bytes.toBytes("bbb");
+    smallDict.addEntry(a, 0, a.length);
+    smallDict.addEntry(b, 0, b.length);
+
+    short idxA = smallDict.findEntry(a, 0, a.length);
+    short idxB = smallDict.findEntry(b, 0, b.length);
+
+    smallDict.savepoint();
+
+    byte[] c = Bytes.toBytes("ccc");
+    smallDict.addEntry(c, 0, c.length);
+
+    smallDict.getEntry(idxA);
+
+    byte[] d = Bytes.toBytes("ddd");
+    smallDict.addEntry(d, 0, d.length);
+
+    smallDict.getEntry(idxB);
+
+    smallDict.rollback();
+
+    assertTrue(Arrays.equals(a, smallDict.getEntry(idxA)));
+    assertTrue(Arrays.equals(b, smallDict.getEntry(idxB)));
+    assertEquals(-1, smallDict.findEntry(c, 0, c.length));
+    assertEquals(-1, smallDict.findEntry(d, 0, d.length));
+  }
+
   static private boolean isDictionaryEmpty(LRUDictionary dict) {
     try {
       dict.getEntry((short) 0);

@@ -264,6 +264,36 @@ public class CompressionContext {
     }
   }
 
+  void savepoint() {
+    for (Dictionary dictionary : dictionaries.values()) {
+      dictionary.savepoint();
+    }
+    if (tagCompressionContext != null) {
+      tagCompressionContext.savepoint();
+    }
+  }
+
+  void rollback() {
+    for (Dictionary dictionary : dictionaries.values()) {
+      dictionary.rollback();
+    }
+    if (tagCompressionContext != null) {
+      tagCompressionContext.rollback();
+    }
+    if (valueCompressor != null) {
+      valueCompressor.clear();
+    }
+  }
+
+  void releaseSavepoint() {
+    for (Dictionary dictionary : dictionaries.values()) {
+      dictionary.releaseSavepoint();
+    }
+    if (tagCompressionContext != null) {
+      tagCompressionContext.releaseSavepoint();
+    }
+  }
+
   public static Compression.Algorithm getValueCompressionAlgorithm(Configuration conf) {
     if (conf.getBoolean(ENABLE_WAL_VALUE_COMPRESSION, true)) {
       String compressionType = conf.get(WAL_VALUE_COMPRESSION_TYPE);

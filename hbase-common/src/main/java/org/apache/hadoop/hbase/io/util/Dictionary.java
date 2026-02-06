@@ -74,6 +74,15 @@ public interface Dictionary {
    */
   void clear();
 
+  default void savepoint() {
+  }
+
+  default void rollback() {
+  }
+
+  default void releaseSavepoint() {
+  }
+
   /**
    * Helper methods to write the dictionary data to the OutputStream
    * @param out    the outputstream to which data needs to be written
