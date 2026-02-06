@@ -23,6 +23,8 @@ import java.io.OutputStream;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationTargetException;
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
+import java.util.List;
 import org.apache.hadoop.hbase.Tag;
 import org.apache.hadoop.hbase.io.util.Dictionary;
 import org.apache.hadoop.hbase.io.util.StreamUtils;
@@ -39,6 +41,8 @@ import org.apache.yetus.audience.InterfaceAudience;
 @InterfaceAudience.Private
 public class TagCompressionContext {
   private final Dictionary tagDict;
+  private boolean deferAdditions = false;
+  private List<byte[]> deferredAdditions;
 
   public TagCompressionContext(Class<? extends Dictionary> dictType, int dictCapacity)
     throws SecurityException, NoSuchMethodException, InstantiationException, IllegalAccessException,
@@ -50,6 +54,34 @@ public class TagCompressionContext {
 
   public void clear() {
     tagDict.clear();
+  }
+
+  public void setDeferAdditions(boolean defer) {
+    this.deferAdditions = defer;
+    if (defer) {
+      if (deferredAdditions == null) {
+        deferredAdditions = new ArrayList<>();
+      } else {
+        deferredAdditions.clear();
+      }
+    }
+  }
+
+  public void commitDeferredAdditions() {
+    if (deferredAdditions != null) {
+      for (byte[] entry : deferredAdditions) {
+        tagDict.addEntry(entry, 0, entry.length);
+      }
+      deferredAdditions.clear();
+    }
+    deferAdditions = false;
+  }
+
+  public void clearDeferredAdditions() {
+    if (deferredAdditions != null) {
+      deferredAdditions.clear();
+    }
+    deferAdditions = false;
   }
 
   /**
@@ -112,7 +144,13 @@ public class TagCompressionContext {
         int tagLen = StreamUtils.readRawVarint32(src);
         offset = Bytes.putAsShort(dest, offset, tagLen);
         IOUtils.readFully(src, dest, offset, tagLen);
-        tagDict.addEntry(dest, offset, tagLen);
+        if (deferAdditions) {
+          byte[] copy = new byte[tagLen];
+          System.arraycopy(dest, offset, copy, 0, tagLen);
+          deferredAdditions.add(copy);
+        } else {
+          tagDict.addEntry(dest, offset, tagLen);
+        }
         offset += tagLen;
       } else {
         short dictIdx = StreamUtils.toShort(status, StreamUtils.readByte(src));

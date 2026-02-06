@@ -21,6 +21,8 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.util.ArrayList;
+import java.util.List;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.HBaseInterfaceAudience;
@@ -278,6 +280,22 @@ public class WALCellCodec implements Codec {
     private final CompressionContext compression;
     private final boolean hasValueCompression;
     private final boolean hasTagCompression;
+    private final List<PendingDictAddition> pendingDictAdditions = new ArrayList<>();
+    private boolean readingValue = false;
+
+    private static class PendingDictAddition {
+      final Dictionary dict;
+      final byte[] data;
+      final int offset;
+      final int length;
+
+      PendingDictAddition(Dictionary dict, byte[] data, int offset, int length) {
+        this.dict = dict;
+        this.data = data;
+        this.offset = offset;
+        this.length = length;
+      }
+    }
 
     public CompressedKvDecoder(InputStream in, CompressionContext compression) {
       super(in);
@@ -286,8 +304,44 @@ public class WALCellCodec implements Codec {
       this.hasTagCompression = compression.hasTagCompression();
     }
 
+    private void commitPendingAdditions() {
+      for (PendingDictAddition pending : pendingDictAdditions) {
+        pending.dict.addEntry(pending.data, pending.offset, pending.length);
+      }
+      pendingDictAdditions.clear();
+      if (hasTagCompression) {
+        compression.tagCompressionContext.commitDeferredAdditions();
+      }
+    }
+
+    private void clearPendingAdditions() {
+      pendingDictAdditions.clear();
+      if (hasTagCompression) {
+        compression.tagCompressionContext.clearDeferredAdditions();
+      }
+    }
+
     @Override
     protected Cell parseCell() throws IOException {
+      clearPendingAdditions();
+      if (hasTagCompression) {
+        compression.tagCompressionContext.setDeferAdditions(true);
+      }
+      readingValue = false;
+      try {
+        Cell cell = parseCellInner();
+        commitPendingAdditions();
+        return cell;
+      } catch (IOException e) {
+        clearPendingAdditions();
+        if (readingValue && hasValueCompression) {
+          compression.getValueCompressor().clear();
+        }
+        throw e;
+      }
+    }
+
+    private Cell parseCellInner() throws IOException {
       int keylength = StreamUtils.readRawVarint32(in);
       int vlength = StreamUtils.readRawVarint32(in);
       int tagsLength = StreamUtils.readRawVarint32(in);
@@ -303,29 +357,24 @@ public class WALCellCodec implements Codec {
       pos = Bytes.putInt(backingArray, pos, keylength);
       pos = Bytes.putInt(backingArray, pos, vlength);
 
-      // the row
       int elemLen = readIntoArray(backingArray, pos + Bytes.SIZEOF_SHORT,
         compression.getDictionary(CompressionContext.DictionaryIndex.ROW));
       checkLength(elemLen, Short.MAX_VALUE);
       pos = Bytes.putShort(backingArray, pos, (short) elemLen);
       pos += elemLen;
 
-      // family
       elemLen = readIntoArray(backingArray, pos + Bytes.SIZEOF_BYTE,
         compression.getDictionary(CompressionContext.DictionaryIndex.FAMILY));
       checkLength(elemLen, Byte.MAX_VALUE);
       pos = Bytes.putByte(backingArray, pos, (byte) elemLen);
       pos += elemLen;
 
-      // qualifier
       elemLen = readIntoArray(backingArray, pos,
         compression.getDictionary(CompressionContext.DictionaryIndex.QUALIFIER));
       pos += elemLen;
 
-      // timestamp
       long ts = StreamUtils.readLong(in);
       pos = Bytes.putLong(backingArray, pos, ts);
-      // type and value
       int typeValLen = length - pos;
       if (tagsLength > 0) {
         typeValLen = typeValLen - tagsLength - KeyValue.TAGS_LENGTH_SIZE;
@@ -333,13 +382,14 @@ public class WALCellCodec implements Codec {
       pos = Bytes.putByte(backingArray, pos, (byte) in.read());
       int valLen = typeValLen - 1;
       if (hasValueCompression) {
+        readingValue = true;
         readCompressedValue(in, backingArray, pos, valLen);
+        readingValue = false;
         pos += valLen;
       } else {
         IOUtils.readFully(in, backingArray, pos, valLen);
         pos += valLen;
       }
-      // tags
       if (tagsLength > 0) {
         pos = Bytes.putAsShort(backingArray, pos, tagsLength);
         if (hasTagCompression) {
@@ -354,20 +404,16 @@ public class WALCellCodec implements Codec {
     private int readIntoArray(byte[] to, int offset, Dictionary dict) throws IOException {
       byte status = StreamUtils.readByte(in);
       if (status == Dictionary.NOT_IN_DICTIONARY) {
-        // status byte indicating that data to be read is not in dictionary.
-        // if this isn't in the dictionary, we need to add to the dictionary.
         int length = StreamUtils.readRawVarint32(in);
         IOUtils.readFully(in, to, offset, length);
-        dict.addEntry(to, offset, length);
+        pendingDictAdditions.add(new PendingDictAddition(dict, to, offset, length));
         return length;
       } else {
-        // the status byte also acts as the higher order byte of the dictionary entry.
         short dictIdx = StreamUtils.toShort(status, StreamUtils.readByte(in));
         byte[] entry = dict.getEntry(dictIdx);
         if (entry == null) {
           throw new IOException("Missing dictionary entry for index " + dictIdx);
         }
-        // now we write the uncompressed value.
         Bytes.putBytes(to, offset, entry, 0, entry.length);
         return entry.length;
       }
