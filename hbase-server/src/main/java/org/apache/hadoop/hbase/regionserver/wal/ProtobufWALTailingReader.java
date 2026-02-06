@@ -303,10 +303,13 @@ public class ProtobufWALTailingReader extends AbstractProtobufWALReader
       return State.EOF_WITH_TRAILER.getResult();
     }
     if (limit < 0) {
+      // should be closed WAL file, set to no limit, i.e, just use the original inputStream
       delegatingInput.setDelegate(inputStream);
     } else if (limit <= originalPosition) {
+      // no data available, just return EOF
       return State.EOF_AND_RESET.getResult();
     } else {
+      // calculate the remaining bytes we can read and set
       delegatingInput.setDelegate(ByteStreams.limit(inputStream, limit - originalPosition));
     }
     ReadWALKeyResult readKeyResult = readWALKey(originalPosition);
@@ -336,28 +339,33 @@ public class ProtobufWALTailingReader extends AbstractProtobufWALReader
     boolean resetSucceed = false;
     try {
       if (!trailerPresent) {
+        // try read trailer this time
         readTrailer(pair.getFirst(), pair.getSecond());
       }
       inputStream = pair.getFirst();
       delegatingInput.setDelegate(inputStream);
       if (position < 0) {
+        // read from the beginning
         if (compressionCtx != null) {
           compressionCtx.clear();
         }
         clearPendingState();
         skipHeader(inputStream);
       } else if (resetCompression && compressionCtx != null) {
+        // clear compressCtx and skip to the expected position, to fill up the dictionary
         compressionCtx.clear();
         skipHeader(inputStream);
         if (position != inputStream.getPos()) {
           skipTo(position);
         }
       } else {
+        // just seek to the expected position
         inputStream.seek(seekPosition);
       }
       resetSucceed = true;
     } finally {
       if (!resetSucceed) {
+        // close the input stream to avoid resource leak
         close();
       }
     }

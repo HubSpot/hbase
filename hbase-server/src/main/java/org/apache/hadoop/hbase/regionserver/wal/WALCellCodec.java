@@ -357,24 +357,29 @@ public class WALCellCodec implements Codec {
       pos = Bytes.putInt(backingArray, pos, keylength);
       pos = Bytes.putInt(backingArray, pos, vlength);
 
+      // the row
       int elemLen = readIntoArray(backingArray, pos + Bytes.SIZEOF_SHORT,
         compression.getDictionary(CompressionContext.DictionaryIndex.ROW));
       checkLength(elemLen, Short.MAX_VALUE);
       pos = Bytes.putShort(backingArray, pos, (short) elemLen);
       pos += elemLen;
 
+      // family
       elemLen = readIntoArray(backingArray, pos + Bytes.SIZEOF_BYTE,
         compression.getDictionary(CompressionContext.DictionaryIndex.FAMILY));
       checkLength(elemLen, Byte.MAX_VALUE);
       pos = Bytes.putByte(backingArray, pos, (byte) elemLen);
       pos += elemLen;
 
+      // qualifier
       elemLen = readIntoArray(backingArray, pos,
         compression.getDictionary(CompressionContext.DictionaryIndex.QUALIFIER));
       pos += elemLen;
 
+      // timestamp
       long ts = StreamUtils.readLong(in);
       pos = Bytes.putLong(backingArray, pos, ts);
+      // type and value
       int typeValLen = length - pos;
       if (tagsLength > 0) {
         typeValLen = typeValLen - tagsLength - KeyValue.TAGS_LENGTH_SIZE;
@@ -390,6 +395,7 @@ public class WALCellCodec implements Codec {
         IOUtils.readFully(in, backingArray, pos, valLen);
         pos += valLen;
       }
+      // tags
       if (tagsLength > 0) {
         pos = Bytes.putAsShort(backingArray, pos, tagsLength);
         if (hasTagCompression) {
@@ -404,16 +410,20 @@ public class WALCellCodec implements Codec {
     private int readIntoArray(byte[] to, int offset, Dictionary dict) throws IOException {
       byte status = StreamUtils.readByte(in);
       if (status == Dictionary.NOT_IN_DICTIONARY) {
+        // status byte indicating that data to be read is not in dictionary.
+        // if this isn't in the dictionary, we need to add to the dictionary.
         int length = StreamUtils.readRawVarint32(in);
         IOUtils.readFully(in, to, offset, length);
         pendingDictAdditions.add(new PendingDictAddition(dict, to, offset, length));
         return length;
       } else {
+        // the status byte also acts as the higher order byte of the dictionary entry.
         short dictIdx = StreamUtils.toShort(status, StreamUtils.readByte(in));
         byte[] entry = dict.getEntry(dictIdx);
         if (entry == null) {
           throw new IOException("Missing dictionary entry for index " + dictIdx);
         }
+        // now we write the uncompressed value.
         Bytes.putBytes(to, offset, entry, 0, entry.length);
         return entry.length;
       }
