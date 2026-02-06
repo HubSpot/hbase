@@ -30,11 +30,9 @@ import org.apache.hadoop.hbase.wal.WALTailingReader;
 import org.apache.yetus.audience.InterfaceAudience;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
 import org.apache.hbase.thirdparty.com.google.common.io.ByteStreams;
 import org.apache.hbase.thirdparty.com.google.protobuf.CodedInputStream;
 import org.apache.hbase.thirdparty.com.google.protobuf.InvalidProtocolBufferException;
-
 import org.apache.hadoop.hbase.shaded.protobuf.ProtobufUtil;
 import org.apache.hadoop.hbase.shaded.protobuf.generated.WALProtos;
 
@@ -221,7 +219,7 @@ public class ProtobufWALTailingReader extends AbstractProtobufWALReader
       } catch (Exception e) {
         IOException realEofEx = extractHiddenEof(e);
         if (realEofEx != null) {
-          LOG.info("EOF after reading {} of {} cells; started reading at {}, last good pos={}",
+          LOG.debug("EOF after reading {} of {} cells; started reading at {}, last good pos={}",
             cellsRead, remainingCells, posBefore, lastGoodPos, realEofEx);
           return savePendingAndReturnEof(entry, remainingCells - cellsRead, lastGoodPos);
         } else {
@@ -231,7 +229,7 @@ public class ProtobufWALTailingReader extends AbstractProtobufWALReader
         }
       }
       if (!advanced) {
-        LOG.info("EOF (advance returned false) after reading {} of {} cells; started at {},"
+        LOG.debug("EOF (advance returned false) after reading {} of {} cells; started at {},"
           + " last good pos={}", cellsRead, remainingCells, posBefore, lastGoodPos);
         return savePendingAndReturnEof(entry, remainingCells - cellsRead, lastGoodPos);
       }
