@@ -258,7 +258,7 @@ public class ProtobufWALTailingReader extends AbstractProtobufWALReader
       pendingEntry = entry;
       pendingRemainingCells = remaining;
       pendingResumePosition = resumePos;
-      return State.EOF_AND_RESET.getResult();
+      return new Result(State.EOF_AND_RESET, null, resumePos);
     }
     return editEof();
   }
