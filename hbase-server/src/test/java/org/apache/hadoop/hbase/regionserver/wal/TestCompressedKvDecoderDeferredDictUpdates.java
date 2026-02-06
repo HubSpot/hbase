@@ -23,7 +23,6 @@ import static org.junit.Assert.assertTrue;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
-import java.io.EOFException;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -131,23 +130,23 @@ public class TestCompressedKvDecoderDeferredDictUpdates {
     if (hasTagCompression) {
       conf.setBoolean(CompressionContext.ENABLE_WAL_TAGS_COMPRESSION, true);
     }
-    CompressionContext writeCtx = new CompressionContext(LRUDictionary.class, false,
-      hasTagCompression, hasValueCompression,
-      hasValueCompression ? valueAlgo : Compression.Algorithm.NONE);
+    CompressionContext writeCtx =
+      new CompressionContext(LRUDictionary.class, false, hasTagCompression, hasValueCompression,
+        hasValueCompression ? valueAlgo : Compression.Algorithm.NONE);
     byte[] fullData = encodeCells(cells, writeCtx, conf);
 
     for (int truncLen = 1; truncLen < fullData.length; truncLen++) {
       byte[] truncated = Arrays.copyOf(fullData, truncLen);
-      CompressionContext readCtx = new CompressionContext(LRUDictionary.class, false,
-        hasTagCompression, hasValueCompression,
-        hasValueCompression ? valueAlgo : Compression.Algorithm.NONE);
+      CompressionContext readCtx =
+        new CompressionContext(LRUDictionary.class, false, hasTagCompression, hasValueCompression,
+          hasValueCompression ? valueAlgo : Compression.Algorithm.NONE);
       Codec.Decoder decoder =
         new WALCellCodec(conf, readCtx).getDecoder(new ByteArrayInputStream(truncated));
       int successfulCells = readUntilEof(decoder);
 
-      CompressionContext verifyCtx = new CompressionContext(LRUDictionary.class, false,
-        hasTagCompression, hasValueCompression,
-        hasValueCompression ? valueAlgo : Compression.Algorithm.NONE);
+      CompressionContext verifyCtx =
+        new CompressionContext(LRUDictionary.class, false, hasTagCompression, hasValueCompression,
+          hasValueCompression ? valueAlgo : Compression.Algorithm.NONE);
       Codec.Decoder verifyDecoder =
         new WALCellCodec(conf, verifyCtx).getDecoder(new ByteArrayInputStream(fullData));
       for (int i = 0; i < successfulCells; i++) {

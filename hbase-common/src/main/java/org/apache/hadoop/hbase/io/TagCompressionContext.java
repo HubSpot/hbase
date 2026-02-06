@@ -43,6 +43,7 @@ public class TagCompressionContext {
   private final Dictionary tagDict;
   private boolean deferAdditions = false;
   private List<byte[]> deferredAdditions;
+  private int deferredBaseIndex;
 
   public TagCompressionContext(Class<? extends Dictionary> dictType, int dictCapacity)
     throws SecurityException, NoSuchMethodException, InstantiationException, IllegalAccessException,
@@ -59,6 +60,7 @@ public class TagCompressionContext {
   public void setDeferAdditions(boolean defer) {
     this.deferAdditions = defer;
     if (defer) {
+      deferredBaseIndex = tagDict.size();
       if (deferredAdditions == null) {
         deferredAdditions = new ArrayList<>();
       } else {
@@ -154,7 +156,7 @@ public class TagCompressionContext {
         offset += tagLen;
       } else {
         short dictIdx = StreamUtils.toShort(status, StreamUtils.readByte(src));
-        byte[] entry = tagDict.getEntry(dictIdx);
+        byte[] entry = getDeferredOrDictEntry(dictIdx);
         if (entry == null) {
           throw new IOException("Missing dictionary entry for index " + dictIdx);
         }
@@ -162,6 +164,20 @@ public class TagCompressionContext {
         System.arraycopy(entry, 0, dest, offset, entry.length);
         offset += entry.length;
       }
+    }
+  }
+
+  private byte[] getDeferredOrDictEntry(short dictIdx) {
+    if (deferAdditions && deferredAdditions != null) {
+      int deferredIdx = dictIdx - deferredBaseIndex;
+      if (deferredIdx >= 0 && deferredIdx < deferredAdditions.size()) {
+        return deferredAdditions.get(deferredIdx);
+      }
+    }
+    try {
+      return tagDict.getEntry(dictIdx);
+    } catch (IndexOutOfBoundsException e) {
+      return null;
     }
   }
 
