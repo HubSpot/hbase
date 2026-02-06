@@ -24,6 +24,7 @@ import static org.junit.Assert.assertTrue;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.EOFException;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.EnumSet;
@@ -76,68 +77,95 @@ public class TestCompressedKvDecoderDeferredDictUpdates {
       HConstants.LATEST_TIMESTAMP, Bytes.toBytes(value), tags);
   }
 
+  private byte[] encodeCells(List<KeyValue> cells, CompressionContext ctx, Configuration conf)
+    throws IOException {
+    WALCellCodec codec = new WALCellCodec(conf, ctx);
+    ByteArrayOutputStream bos = new ByteArrayOutputStream();
+    Codec.Encoder encoder = codec.getEncoder(bos);
+    for (KeyValue kv : cells) {
+      encoder.write(kv);
+    }
+    encoder.flush();
+    return bos.toByteArray();
+  }
+
+  private int readUntilEof(Codec.Decoder decoder) throws IOException {
+    int count = 0;
+    boolean hitEof = false;
+    while (!hitEof) {
+      try {
+        if (!decoder.advance()) {
+          hitEof = true;
+        } else {
+          count++;
+        }
+      } catch (Exception e) {
+        hitEof = true;
+      }
+    }
+    return count;
+  }
+
+  private void assertDictionariesMatch(CompressionContext actual, CompressionContext expected,
+    int truncLen, int successfulCells) {
+    for (CompressionContext.DictionaryIndex idx : CELL_DICTIONARIES) {
+      Dictionary actualDict = actual.getDictionary(idx);
+      Dictionary expectedDict = expected.getDictionary(idx);
+      for (short s = 0; s < Short.MAX_VALUE; s++) {
+        byte[] actualEntry = safeGetEntry(actualDict, s);
+        byte[] expectedEntry = safeGetEntry(expectedDict, s);
+        if (actualEntry == null && expectedEntry == null) {
+          break;
+        }
+        assertArrayEquals(
+          String.format("Dictionary %s entry %d mismatch at truncLen=%d, successfulCells=%d", idx,
+            s, truncLen, successfulCells),
+          expectedEntry, actualEntry);
+      }
+    }
+  }
+
+  private void verifyDictsMatchAfterTruncation(List<KeyValue> cells, boolean hasTagCompression,
+    boolean hasValueCompression, Compression.Algorithm valueAlgo) throws Exception {
+    Configuration conf = new Configuration(false);
+    if (hasTagCompression) {
+      conf.setBoolean(CompressionContext.ENABLE_WAL_TAGS_COMPRESSION, true);
+    }
+    CompressionContext writeCtx = new CompressionContext(LRUDictionary.class, false,
+      hasTagCompression, hasValueCompression,
+      hasValueCompression ? valueAlgo : Compression.Algorithm.NONE);
+    byte[] fullData = encodeCells(cells, writeCtx, conf);
+
+    for (int truncLen = 1; truncLen < fullData.length; truncLen++) {
+      byte[] truncated = Arrays.copyOf(fullData, truncLen);
+      CompressionContext readCtx = new CompressionContext(LRUDictionary.class, false,
+        hasTagCompression, hasValueCompression,
+        hasValueCompression ? valueAlgo : Compression.Algorithm.NONE);
+      Codec.Decoder decoder =
+        new WALCellCodec(conf, readCtx).getDecoder(new ByteArrayInputStream(truncated));
+      int successfulCells = readUntilEof(decoder);
+
+      CompressionContext verifyCtx = new CompressionContext(LRUDictionary.class, false,
+        hasTagCompression, hasValueCompression,
+        hasValueCompression ? valueAlgo : Compression.Algorithm.NONE);
+      Codec.Decoder verifyDecoder =
+        new WALCellCodec(conf, verifyCtx).getDecoder(new ByteArrayInputStream(fullData));
+      for (int i = 0; i < successfulCells; i++) {
+        assertTrue("verifyDecoder.advance() should return true for cell " + i,
+          verifyDecoder.advance());
+      }
+
+      assertDictionariesMatch(readCtx, verifyCtx, truncLen, successfulCells);
+    }
+  }
+
   @Test
   public void itPreservesDictionaryStateOnTruncatedStream() throws Exception {
     List<KeyValue> cells = new ArrayList<>();
     for (int i = 0; i < 5; i++) {
       cells.add(createKV("row-" + i, "qual-" + i, "value-" + i, 0));
     }
-
-    CompressionContext writeCtx = new CompressionContext(LRUDictionary.class, false, false);
-    Configuration conf = new Configuration(false);
-    WALCellCodec writeCodec = new WALCellCodec(conf, writeCtx);
-    ByteArrayOutputStream bos = new ByteArrayOutputStream();
-    Codec.Encoder encoder = writeCodec.getEncoder(bos);
-    for (KeyValue kv : cells) {
-      encoder.write(kv);
-    }
-    encoder.flush();
-    byte[] fullData = bos.toByteArray();
-
-    for (int truncLen = 1; truncLen < fullData.length; truncLen++) {
-      byte[] truncated = Arrays.copyOf(fullData, truncLen);
-      CompressionContext readCtx = new CompressionContext(LRUDictionary.class, false, false);
-      WALCellCodec readCodec = new WALCellCodec(conf, readCtx);
-      Codec.Decoder decoder = readCodec.getDecoder(new ByteArrayInputStream(truncated));
-
-      int successfulCells = 0;
-      boolean hitEof = false;
-      while (!hitEof) {
-        try {
-          if (!decoder.advance()) {
-            hitEof = true;
-          } else {
-            successfulCells++;
-          }
-        } catch (EOFException e) {
-          hitEof = true;
-        }
-      }
-
-      CompressionContext verifyCtx = new CompressionContext(LRUDictionary.class, false, false);
-      WALCellCodec verifyCodec = new WALCellCodec(conf, verifyCtx);
-      Codec.Decoder verifyDecoder = verifyCodec.getDecoder(new ByteArrayInputStream(fullData));
-      for (int i = 0; i < successfulCells; i++) {
-        assertTrue("verifyDecoder.advance() should return true for cell " + i,
-          verifyDecoder.advance());
-      }
-
-      for (CompressionContext.DictionaryIndex idx : CELL_DICTIONARIES) {
-        Dictionary readDict = readCtx.getDictionary(idx);
-        Dictionary verifyDict = verifyCtx.getDictionary(idx);
-        for (short s = 0; s < Short.MAX_VALUE; s++) {
-          byte[] readEntry = safeGetEntry(readDict, s);
-          byte[] verifyEntry = safeGetEntry(verifyDict, s);
-          if (readEntry == null && verifyEntry == null) {
-            break;
-          }
-          assertArrayEquals(
-            String.format("Dictionary %s entry %d mismatch at truncLen=%d, successfulCells=%d", idx,
-              s, truncLen, successfulCells),
-            verifyEntry, readEntry);
-        }
-      }
-    }
+    verifyDictsMatchAfterTruncation(cells, false, false, null);
   }
 
   @Test
@@ -146,63 +174,7 @@ public class TestCompressedKvDecoderDeferredDictUpdates {
     for (int i = 0; i < 4; i++) {
       cells.add(createKV("row-" + i, "qual-" + i, "value-" + i, 2));
     }
-
-    CompressionContext writeCtx = new CompressionContext(LRUDictionary.class, false, true);
-    Configuration conf = new Configuration(false);
-    conf.setBoolean(CompressionContext.ENABLE_WAL_TAGS_COMPRESSION, true);
-    WALCellCodec writeCodec = new WALCellCodec(conf, writeCtx);
-    ByteArrayOutputStream bos = new ByteArrayOutputStream();
-    Codec.Encoder encoder = writeCodec.getEncoder(bos);
-    for (KeyValue kv : cells) {
-      encoder.write(kv);
-    }
-    encoder.flush();
-    byte[] fullData = bos.toByteArray();
-
-    for (int truncLen = 1; truncLen < fullData.length; truncLen++) {
-      byte[] truncated = Arrays.copyOf(fullData, truncLen);
-      CompressionContext readCtx = new CompressionContext(LRUDictionary.class, false, true);
-      WALCellCodec readCodec = new WALCellCodec(conf, readCtx);
-      Codec.Decoder decoder = readCodec.getDecoder(new ByteArrayInputStream(truncated));
-
-      int successfulCells = 0;
-      boolean hitEof = false;
-      while (!hitEof) {
-        try {
-          if (!decoder.advance()) {
-            hitEof = true;
-          } else {
-            successfulCells++;
-          }
-        } catch (EOFException e) {
-          hitEof = true;
-        }
-      }
-
-      CompressionContext verifyCtx = new CompressionContext(LRUDictionary.class, false, true);
-      WALCellCodec verifyCodec = new WALCellCodec(conf, verifyCtx);
-      Codec.Decoder verifyDecoder = verifyCodec.getDecoder(new ByteArrayInputStream(fullData));
-      for (int i = 0; i < successfulCells; i++) {
-        assertTrue("verifyDecoder.advance() should return true for cell " + i,
-          verifyDecoder.advance());
-      }
-
-      for (CompressionContext.DictionaryIndex idx : CELL_DICTIONARIES) {
-        Dictionary readDict = readCtx.getDictionary(idx);
-        Dictionary verifyDict = verifyCtx.getDictionary(idx);
-        for (short s = 0; s < Short.MAX_VALUE; s++) {
-          byte[] readEntry = safeGetEntry(readDict, s);
-          byte[] verifyEntry = safeGetEntry(verifyDict, s);
-          if (readEntry == null && verifyEntry == null) {
-            break;
-          }
-          assertArrayEquals(
-            String.format("Dictionary %s entry %d mismatch at truncLen=%d, successfulCells=%d", idx,
-              s, truncLen, successfulCells),
-            verifyEntry, readEntry);
-        }
-      }
-    }
+    verifyDictsMatchAfterTruncation(cells, true, false, null);
   }
 
   @Test
@@ -213,65 +185,7 @@ public class TestCompressedKvDecoderDeferredDictUpdates {
       Bytes.random(value);
       cells.add(createKV("row-" + i, "qual-" + i, Bytes.toString(value), 0));
     }
-
-    CompressionContext writeCtx =
-      new CompressionContext(LRUDictionary.class, false, false, true, Compression.Algorithm.GZ);
-    Configuration conf = new Configuration(false);
-    WALCellCodec writeCodec = new WALCellCodec(conf, writeCtx);
-    ByteArrayOutputStream bos = new ByteArrayOutputStream();
-    Codec.Encoder encoder = writeCodec.getEncoder(bos);
-    for (KeyValue kv : cells) {
-      encoder.write(kv);
-    }
-    encoder.flush();
-    byte[] fullData = bos.toByteArray();
-
-    for (int truncLen = 1; truncLen < fullData.length; truncLen++) {
-      byte[] truncated = Arrays.copyOf(fullData, truncLen);
-      CompressionContext readCtx =
-        new CompressionContext(LRUDictionary.class, false, false, true, Compression.Algorithm.GZ);
-      WALCellCodec readCodec = new WALCellCodec(conf, readCtx);
-      Codec.Decoder decoder = readCodec.getDecoder(new ByteArrayInputStream(truncated));
-
-      int successfulCells = 0;
-      boolean hitEof = false;
-      while (!hitEof) {
-        try {
-          if (!decoder.advance()) {
-            hitEof = true;
-          } else {
-            successfulCells++;
-          }
-        } catch (Exception e) {
-          hitEof = true;
-        }
-      }
-
-      CompressionContext verifyCtx =
-        new CompressionContext(LRUDictionary.class, false, false, true, Compression.Algorithm.GZ);
-      WALCellCodec verifyCodec = new WALCellCodec(conf, verifyCtx);
-      Codec.Decoder verifyDecoder = verifyCodec.getDecoder(new ByteArrayInputStream(fullData));
-      for (int i = 0; i < successfulCells; i++) {
-        assertTrue("verifyDecoder.advance() should return true for cell " + i,
-          verifyDecoder.advance());
-      }
-
-      for (CompressionContext.DictionaryIndex idx : CELL_DICTIONARIES) {
-        Dictionary readDict = readCtx.getDictionary(idx);
-        Dictionary verifyDict = verifyCtx.getDictionary(idx);
-        for (short s = 0; s < Short.MAX_VALUE; s++) {
-          byte[] readEntry = safeGetEntry(readDict, s);
-          byte[] verifyEntry = safeGetEntry(verifyDict, s);
-          if (readEntry == null && verifyEntry == null) {
-            break;
-          }
-          assertArrayEquals(
-            String.format("Dictionary %s entry %d mismatch at truncLen=%d, successfulCells=%d", idx,
-              s, truncLen, successfulCells),
-            verifyEntry, readEntry);
-        }
-      }
-    }
+    verifyDictsMatchAfterTruncation(cells, false, true, Compression.Algorithm.GZ);
   }
 
   @Test
@@ -281,16 +195,9 @@ public class TestCompressedKvDecoderDeferredDictUpdates {
       cells.add(createKV("row-" + i, "qual-" + i, "value-" + i, 0));
     }
 
-    CompressionContext writeCtx = new CompressionContext(LRUDictionary.class, false, false);
     Configuration conf = new Configuration(false);
-    WALCellCodec writeCodec = new WALCellCodec(conf, writeCtx);
-    ByteArrayOutputStream bos = new ByteArrayOutputStream();
-    Codec.Encoder encoder = writeCodec.getEncoder(bos);
-    for (KeyValue kv : cells) {
-      encoder.write(kv);
-    }
-    encoder.flush();
-    byte[] fullData = bos.toByteArray();
+    CompressionContext writeCtx = new CompressionContext(LRUDictionary.class, false, false);
+    byte[] fullData = encodeCells(cells, writeCtx, conf);
 
     int[] cellEndOffsets = new int[cells.size()];
     {
@@ -315,20 +222,7 @@ public class TestCompressedKvDecoderDeferredDictUpdates {
       CompressionContext readCtx = new CompressionContext(LRUDictionary.class, false, false);
       WALCellCodec readCodec = new WALCellCodec(conf, readCtx);
       Codec.Decoder decoder = readCodec.getDecoder(new ByteArrayInputStream(truncated));
-
-      int successfulCells = 0;
-      boolean hitEof = false;
-      while (!hitEof) {
-        try {
-          if (!decoder.advance()) {
-            hitEof = true;
-          } else {
-            successfulCells++;
-          }
-        } catch (EOFException e) {
-          hitEof = true;
-        }
-      }
+      int successfulCells = readUntilEof(decoder);
       assertEquals("successfulCells at cellIdx=" + cellIdx, cellIdx + 1, successfulCells);
 
       int resumeOffset = cellEndOffsets[cellIdx];
@@ -336,8 +230,8 @@ public class TestCompressedKvDecoderDeferredDictUpdates {
         new ByteArrayInputStream(fullData, resumeOffset, fullData.length - resumeOffset));
 
       CompressionContext verifyCtx = new CompressionContext(LRUDictionary.class, false, false);
-      WALCellCodec verifyCodec = new WALCellCodec(conf, verifyCtx);
-      Codec.Decoder verifyDecoder = verifyCodec.getDecoder(new ByteArrayInputStream(fullData));
+      Codec.Decoder verifyDecoder =
+        new WALCellCodec(conf, verifyCtx).getDecoder(new ByteArrayInputStream(fullData));
       for (int i = 0; i < successfulCells; i++) {
         assertTrue(verifyDecoder.advance());
       }
@@ -346,153 +240,6 @@ public class TestCompressedKvDecoderDeferredDictUpdates {
         assertTrue("resume should advance for cell " + i, resumeDecoder.advance());
         assertTrue("verify should advance for cell " + i, verifyDecoder.advance());
         assertArrayEquals(String.format("cell %d content mismatch at cellIdx=%d", i, cellIdx),
-          ((KeyValue) verifyDecoder.current()).getBuffer(),
-          ((KeyValue) resumeDecoder.current()).getBuffer());
-      }
-    }
-  }
-
-  @Test
-  public void itPreservesDictionaryStateWithDictionaryHits() throws Exception {
-    List<KeyValue> cells = new ArrayList<>();
-    cells.add(createKV("row-A", "q0", "v0", 0));
-    cells.add(createKV("row-A", "q1", "v1", 0));
-    cells.add(createKV("row-B", "q0", "v2", 0));
-    cells.add(createKV("row-A", "q0", "v3", 0));
-    cells.add(createKV("row-C", "q2", "v4", 0));
-
-    CompressionContext writeCtx = new CompressionContext(LRUDictionary.class, false, false);
-    Configuration conf = new Configuration(false);
-    WALCellCodec writeCodec = new WALCellCodec(conf, writeCtx);
-    ByteArrayOutputStream bos = new ByteArrayOutputStream();
-    Codec.Encoder encoder = writeCodec.getEncoder(bos);
-    for (KeyValue kv : cells) {
-      encoder.write(kv);
-    }
-    encoder.flush();
-    byte[] fullData = bos.toByteArray();
-
-    for (int truncLen = 1; truncLen < fullData.length; truncLen++) {
-      byte[] truncated = Arrays.copyOf(fullData, truncLen);
-      CompressionContext readCtx = new CompressionContext(LRUDictionary.class, false, false);
-      WALCellCodec readCodec = new WALCellCodec(conf, readCtx);
-      Codec.Decoder decoder = readCodec.getDecoder(new ByteArrayInputStream(truncated));
-
-      int successfulCells = 0;
-      boolean hitEof = false;
-      while (!hitEof) {
-        try {
-          if (!decoder.advance()) {
-            hitEof = true;
-          } else {
-            successfulCells++;
-          }
-        } catch (EOFException e) {
-          hitEof = true;
-        }
-      }
-
-      CompressionContext verifyCtx = new CompressionContext(LRUDictionary.class, false, false);
-      WALCellCodec verifyCodec = new WALCellCodec(conf, verifyCtx);
-      Codec.Decoder verifyDecoder = verifyCodec.getDecoder(new ByteArrayInputStream(fullData));
-      for (int i = 0; i < successfulCells; i++) {
-        assertTrue(verifyDecoder.advance());
-      }
-
-      for (CompressionContext.DictionaryIndex idx : CELL_DICTIONARIES) {
-        Dictionary readDict = readCtx.getDictionary(idx);
-        Dictionary verifyDict = verifyCtx.getDictionary(idx);
-        for (short s = 0; s < Short.MAX_VALUE; s++) {
-          byte[] readEntry = safeGetEntry(readDict, s);
-          byte[] verifyEntry = safeGetEntry(verifyDict, s);
-          if (readEntry == null && verifyEntry == null) {
-            break;
-          }
-          assertArrayEquals(
-            String.format("Dictionary %s entry %d mismatch at truncLen=%d, successfulCells=%d", idx,
-              s, truncLen, successfulCells),
-            verifyEntry, readEntry);
-        }
-      }
-    }
-  }
-
-  @Test
-  public void itPreservesTagDictionaryOnResumeAfterTruncation() throws Exception {
-    List<KeyValue> cells = new ArrayList<>();
-    cells.add(createKV("row-A", "q0", "v0", 2));
-    cells.add(createKV("row-A", "q1", "v1", 2));
-    cells.add(createKV("row-B", "q0", "v2", 2));
-    cells.add(createKV("row-B", "q1", "v3", 2));
-    cells.add(createKV("row-A", "q2", "v4", 2));
-
-    CompressionContext writeCtx = new CompressionContext(LRUDictionary.class, false, true);
-    Configuration conf = new Configuration(false);
-    conf.setBoolean(CompressionContext.ENABLE_WAL_TAGS_COMPRESSION, true);
-    WALCellCodec writeCodec = new WALCellCodec(conf, writeCtx);
-    ByteArrayOutputStream bos = new ByteArrayOutputStream();
-    Codec.Encoder encoder = writeCodec.getEncoder(bos);
-    for (KeyValue kv : cells) {
-      encoder.write(kv);
-    }
-    encoder.flush();
-    byte[] fullData = bos.toByteArray();
-
-    int[] cellEndOffsets = new int[cells.size()];
-    {
-      CompressionContext scanCtx = new CompressionContext(LRUDictionary.class, false, true);
-      WALCellCodec scanCodec = new WALCellCodec(conf, scanCtx);
-      for (int i = 0; i < cells.size(); i++) {
-        ByteArrayOutputStream cellBos = new ByteArrayOutputStream();
-        Codec.Encoder cellEncoder = scanCodec.getEncoder(cellBos);
-        cellEncoder.write(cells.get(i));
-        cellEncoder.flush();
-        cellEndOffsets[i] = (i == 0) ? cellBos.size() : cellEndOffsets[i - 1] + cellBos.size();
-      }
-    }
-
-    for (int cellIdx = 0; cellIdx < cells.size() - 1; cellIdx++) {
-      int truncPoint = cellEndOffsets[cellIdx] + 1;
-      if (truncPoint >= fullData.length) {
-        continue;
-      }
-      byte[] truncated = Arrays.copyOf(fullData, truncPoint);
-
-      CompressionContext readCtx = new CompressionContext(LRUDictionary.class, false, true);
-      WALCellCodec readCodec = new WALCellCodec(conf, readCtx);
-      Codec.Decoder decoder = readCodec.getDecoder(new ByteArrayInputStream(truncated));
-
-      int successfulCells = 0;
-      boolean hitEof = false;
-      while (!hitEof) {
-        try {
-          if (!decoder.advance()) {
-            hitEof = true;
-          } else {
-            successfulCells++;
-          }
-        } catch (EOFException e) {
-          hitEof = true;
-        }
-      }
-      assertEquals("successfulCells at cellIdx=" + cellIdx, cellIdx + 1, successfulCells);
-
-      int resumeOffset = cellEndOffsets[cellIdx];
-      Codec.Decoder resumeDecoder = readCodec.getDecoder(
-        new ByteArrayInputStream(fullData, resumeOffset, fullData.length - resumeOffset));
-
-      CompressionContext verifyCtx = new CompressionContext(LRUDictionary.class, false, true);
-      WALCellCodec verifyCodec = new WALCellCodec(conf, verifyCtx);
-      Codec.Decoder verifyDecoder = verifyCodec.getDecoder(new ByteArrayInputStream(fullData));
-      for (int i = 0; i < successfulCells; i++) {
-        assertTrue(verifyDecoder.advance());
-      }
-
-      for (int i = successfulCells; i < cells.size(); i++) {
-        assertTrue("resume should advance for cell " + i, resumeDecoder.advance());
-        assertTrue("verify should advance for cell " + i, verifyDecoder.advance());
-        assertArrayEquals(
-          String.format("cell %d (including tags) mismatch at cellIdx=%d", i, cellIdx),
           ((KeyValue) verifyDecoder.current()).getBuffer(),
           ((KeyValue) resumeDecoder.current()).getBuffer());
       }
