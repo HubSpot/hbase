@@ -42,7 +42,7 @@ import org.apache.yetus.audience.InterfaceAudience;
 public class TagCompressionContext {
   private final Dictionary tagDict;
   private boolean deferAdditions = false;
-  private List<byte[]> deferredAdditions;
+  private final List<byte[]> deferredAdditions = new ArrayList<>();
   private int deferredBaseIndex;
 
   public TagCompressionContext(Class<? extends Dictionary> dictType, int dictCapacity)
@@ -61,28 +61,20 @@ public class TagCompressionContext {
     this.deferAdditions = defer;
     if (defer) {
       deferredBaseIndex = tagDict.size();
-      if (deferredAdditions == null) {
-        deferredAdditions = new ArrayList<>();
-      } else {
-        deferredAdditions.clear();
-      }
+      deferredAdditions.clear();
     }
   }
 
   public void commitDeferredAdditions() {
-    if (deferredAdditions != null) {
-      for (byte[] entry : deferredAdditions) {
-        tagDict.addEntry(entry, 0, entry.length);
-      }
-      deferredAdditions.clear();
+    for (byte[] entry : deferredAdditions) {
+      tagDict.addEntry(entry, 0, entry.length);
     }
+    deferredAdditions.clear();
     deferAdditions = false;
   }
 
   public void clearDeferredAdditions() {
-    if (deferredAdditions != null) {
-      deferredAdditions.clear();
-    }
+    deferredAdditions.clear();
     deferAdditions = false;
   }
 
@@ -168,7 +160,7 @@ public class TagCompressionContext {
   }
 
   private byte[] getDeferredOrDictEntry(short dictIdx) {
-    if (deferAdditions && deferredAdditions != null) {
+    if (deferAdditions) {
       int deferredIdx = dictIdx - deferredBaseIndex;
       if (deferredIdx >= 0 && deferredIdx < deferredAdditions.size()) {
         return deferredAdditions.get(deferredIdx);
