@@ -280,7 +280,17 @@ public class WALCellCodec implements Codec {
     private final CompressionContext compression;
     private final boolean hasValueCompression;
     private final boolean hasTagCompression;
+
+    // When the WAL tailing reader hits EOF mid-cell, the compression dictionaries must remain
+    // in the state they were after the last fully-read cell. Otherwise the reader would need
+    // an expensive O(n) reset (re-read from the start of the file to rebuild dictionary state).
+    // To achieve this, dictionary additions for ROW, FAMILY, and QUALIFIER are buffered here
+    // and only flushed on successful cell parse. On failure, they are discarded.
+    // Tag dictionary additions are deferred similarly via TagCompressionContext.
     private final List<PendingDictAddition> pendingDictAdditions = new ArrayList<>();
+
+    // Tracks whether we are in the value decompression phase of parseCellInner(), so that on
+    // IOException we know whether the ValueCompressor's internal state needs to be reset.
     private boolean readingValue = false;
 
     private static class PendingDictAddition {
