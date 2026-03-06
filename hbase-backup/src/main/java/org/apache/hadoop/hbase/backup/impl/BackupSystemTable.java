@@ -408,12 +408,10 @@ public final class BackupSystemTable implements Closeable {
         TableName table = null;
         String fam = null;
         String path = null;
-        String region = null;
-        byte[] row = null;
+        byte[] row = CellUtil.cloneRow(res.current());
+        String rowStr = Bytes.toString(row);
+        String region = BackupSystemTable.getRegionNameFromOrigBulkLoadRow(rowStr);
         for (Cell cell : res.listCells()) {
-          row = CellUtil.cloneRow(cell);
-          String rowStr = Bytes.toString(row);
-          region = BackupSystemTable.getRegionNameFromOrigBulkLoadRow(rowStr);
           if (
             CellUtil.compareQualifiers(cell, BackupSystemTable.TBL_COL, 0,
               BackupSystemTable.TBL_COL.length) == 0
@@ -1459,12 +1457,12 @@ public final class BackupSystemTable implements Closeable {
 
   static String getTableNameFromOrigBulkLoadRow(String rowStr) {
     // format is bulk : namespace : table : region : file
-    return Iterators.get(Splitter.onPattern(BLK_LD_DELIM).split(rowStr).iterator(), 1);
+    return Iterators.get(Splitter.on(BLK_LD_DELIM).split(rowStr).iterator(), 1);
   }
 
   static String getRegionNameFromOrigBulkLoadRow(String rowStr) {
     // format is bulk : namespace : table : region : file
-    List<String> parts = Splitter.onPattern(BLK_LD_DELIM).splitToList(rowStr);
+    List<String> parts = Splitter.on(BLK_LD_DELIM).splitToList(rowStr);
     Iterator<String> i = parts.iterator();
     int idx = 3;
     if (parts.size() == 4) {
@@ -1472,7 +1470,7 @@ public final class BackupSystemTable implements Closeable {
       idx = 2;
     }
     String region = Iterators.get(i, idx);
-    LOG.debug("bulk row string " + rowStr + " region " + region);
+    LOG.debug("bulk row string {} region {}", rowStr, region);
     return region;
   }
 
