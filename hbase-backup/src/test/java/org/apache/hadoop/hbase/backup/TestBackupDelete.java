@@ -18,6 +18,8 @@
 package org.apache.hadoop.hbase.backup;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 import java.io.ByteArrayOutputStream;
@@ -27,7 +29,11 @@ import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hbase.HBaseClassTestRule;
 import org.apache.hadoop.hbase.TableName;
+import org.apache.hadoop.hbase.backup.BackupInfo.BackupState;
 import org.apache.hadoop.hbase.backup.impl.BackupSystemTable;
+import org.apache.hadoop.hbase.client.Connection;
+import org.apache.hadoop.hbase.client.ConnectionFactory;
+import org.apache.hadoop.hbase.client.Table;
 import org.apache.hadoop.hbase.testclassification.LargeTests;
 import org.apache.hadoop.hbase.util.EnvironmentEdge;
 import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
@@ -182,5 +188,72 @@ public class TestBackupDelete extends TestBackupBase {
     getBackupAdmin().deleteBackups(new String[] { backupId1 });
     assertEquals(Sets.newHashSet(table3),
       backupSystemTable.getIncrementalBackupTableSet(BACKUP_ROOT_DIR));
+  }
+
+  /**
+   * Verify that deleting a FAILED backup does not cascade-delete newer COMPLETE backups of the same
+   * table. A failed backup never contributed WAL data to the incremental chain, so newer backups
+   * should not be treated as dependents.
+   */
+  @Test
+  public void testDeleteFailedBackupDoesNotCascade() throws Exception {
+    LOG.info("test that deleting a failed backup does not cascade to newer complete backups");
+
+    List<TableName> tableList = Lists.newArrayList(table1);
+
+    // Step 1: Full backup (establishes the chain root)
+    String fullBackupId = fullTableBackup(tableList);
+    assertTrue(checkSucceeded(fullBackupId));
+    LOG.info("full backup complete: " + fullBackupId);
+
+    // Step 2: Insert data and take first incremental backup
+    try (Connection conn = ConnectionFactory.createConnection(conf1);
+      Table t1 = conn.getTable(table1)) {
+      loadTable(t1);
+    }
+    String incrBackupId1 = incrementalTableBackup(tableList);
+    assertTrue(checkSucceeded(incrBackupId1));
+    LOG.info("incremental backup 1 complete: " + incrBackupId1);
+
+    // Step 3: Insert more data and take second incremental backup
+    try (Connection conn = ConnectionFactory.createConnection(conf1);
+      Table t1 = conn.getTable(table1)) {
+      loadTable(t1);
+    }
+    String incrBackupId2 = incrementalTableBackup(tableList);
+    assertTrue(checkSucceeded(incrBackupId2));
+    LOG.info("incremental backup 2 complete: " + incrBackupId2);
+
+    // Verify incrBackupId2 data exists on filesystem
+    try (BackupSystemTable sysTable = new BackupSystemTable(TEST_UTIL.getConnection())) {
+      BackupInfo incrInfo2 = sysTable.readBackupInfo(incrBackupId2);
+      assertNotNull("incrBackupId2 should exist before deletion", incrInfo2);
+      Path incrPath2 = new Path(incrInfo2.getBackupRootDir(), incrBackupId2);
+      FileSystem fs = FileSystem.get(incrPath2.toUri(), conf1);
+      assertTrue("incrBackupId2 data should exist on filesystem", fs.exists(incrPath2));
+
+      // Step 4: Mark incrBackupId1 as FAILED (simulates a backup that failed mid-run)
+      BackupInfo incrInfo1 = sysTable.readBackupInfo(incrBackupId1);
+      incrInfo1.setState(BackupState.FAILED);
+      sysTable.updateBackupInfo(incrInfo1);
+      LOG.info("marked " + incrBackupId1 + " as FAILED");
+
+      // Step 5: Delete the failed backup
+      int deleted = getBackupAdmin().deleteBackups(new String[] { incrBackupId1 });
+      assertTrue("should have deleted 1 backup", deleted == 1);
+      LOG.info("deleted failed backup " + incrBackupId1);
+
+      // Step 6: Verify incrBackupId2 was NOT cascade-deleted
+      BackupInfo incrInfo2AfterDelete = sysTable.readBackupInfo(incrBackupId2);
+      assertNotNull(
+        "incrBackupId2 metadata should still exist after deleting a failed backup",
+        incrInfo2AfterDelete);
+      assertTrue(
+        "incrBackupId2 data should still exist on filesystem after deleting a failed backup",
+        fs.exists(incrPath2));
+    }
+
+    // Clean up remaining backups to avoid polluting other tests
+    getBackupAdmin().deleteBackups(new String[] { incrBackupId2, fullBackupId });
   }
 }

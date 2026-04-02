@@ -229,18 +229,22 @@ public class BackupAdminImpl implements BackupAdmin {
       // List of tables in this backup;
       List<TableName> tables = backupInfo.getTableNames();
       long startTime = backupInfo.getStartTs();
-      for (TableName tn : tables) {
-        boolean isLastBackupSession = isLastBackupSession(sysTable, tn, startTime);
-        if (isLastBackupSession) {
-          continue;
-        }
-        // else
-        List<BackupInfo> affectedBackups = getAffectedBackupSessions(backupInfo, tn, sysTable);
-        for (BackupInfo info : affectedBackups) {
-          if (info.equals(backupInfo)) {
+      // Skip cascade logic for FAILED backups: a failed backup never contributed WAL data
+      // to the incremental chain, so newer backups do not depend on it.
+      if (backupInfo.getState() != BackupInfo.BackupState.FAILED) {
+        for (TableName tn : tables) {
+          boolean isLastBackupSession = isLastBackupSession(sysTable, tn, startTime);
+          if (isLastBackupSession) {
             continue;
           }
-          removeTableFromBackupImage(info, tn, sysTable);
+          // else
+          List<BackupInfo> affectedBackups = getAffectedBackupSessions(backupInfo, tn, sysTable);
+          for (BackupInfo info : affectedBackups) {
+            if (info.equals(backupInfo)) {
+              continue;
+            }
+            removeTableFromBackupImage(info, tn, sysTable);
+          }
         }
       }
       Map<byte[], String> map = sysTable.readBulkLoadedFiles(backupId);
