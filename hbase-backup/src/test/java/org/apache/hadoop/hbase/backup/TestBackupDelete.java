@@ -19,7 +19,6 @@ package org.apache.hadoop.hbase.backup;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 import java.io.ByteArrayOutputStream;
@@ -245,8 +244,7 @@ public class TestBackupDelete extends TestBackupBase {
 
       // Step 6: Verify incrBackupId2 was NOT cascade-deleted
       BackupInfo incrInfo2AfterDelete = sysTable.readBackupInfo(incrBackupId2);
-      assertNotNull(
-        "incrBackupId2 metadata should still exist after deleting a failed backup",
+      assertNotNull("incrBackupId2 metadata should still exist after deleting a failed backup",
         incrInfo2AfterDelete);
       assertTrue(
         "incrBackupId2 data should still exist on filesystem after deleting a failed backup",
