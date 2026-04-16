@@ -207,7 +207,7 @@ public class TestRegionReplicaReplicationEndpointNoMaster {
       RegionReplicaReplayCallable callable = new RegionReplicaReplayCallable(connection,
         RpcControllerFactory.instantiate(connection.getConfiguration()), table.getName(),
         locations.getRegionLocation(1), locations.getRegionLocation(1).getRegionInfo(), row,
-        Lists.newArrayList(entry), new AtomicLong());
+        Lists.newArrayList(entry), new AtomicLong(), Integer.MAX_VALUE);
 
       RpcRetryingCallerFactory factory =
         RpcRetryingCallerFactory.instantiate(connection.getConfiguration(),
