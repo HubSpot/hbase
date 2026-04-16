@@ -52,6 +52,7 @@ import org.apache.hadoop.hbase.client.RpcRetryingCallerFactory;
 import org.apache.hadoop.hbase.client.TableDescriptor;
 import org.apache.hadoop.hbase.ipc.HBaseRpcController;
 import org.apache.hadoop.hbase.ipc.RpcControllerFactory;
+import org.apache.hadoop.hbase.ipc.RpcServer;
 import org.apache.hadoop.hbase.protobuf.ReplicationProtbufUtil;
 import org.apache.hadoop.hbase.replication.HBaseReplicationEndpoint;
 import org.apache.hadoop.hbase.replication.WALEntryFilter;
@@ -102,6 +103,9 @@ public class RegionReplicaReplicationEndpoint extends HBaseReplicationEndpoint {
 
   private int operationTimeout;
 
+  // Size limit for replication RPCs, in bytes
+  private int replicationRpcLimit;
+
   private ExecutorService pool;
 
   @Override
@@ -134,6 +138,10 @@ public class RegionReplicaReplicationEndpoint extends HBaseReplicationEndpoint {
     // use the regular RPC timeout for replica replication RPC's
     this.operationTimeout = conf.getInt(HConstants.HBASE_CLIENT_OPERATION_TIMEOUT,
       HConstants.DEFAULT_HBASE_CLIENT_OPERATION_TIMEOUT);
+
+    // Set the size limit for replication RPCs to 95% of the max request size.
+    this.replicationRpcLimit =
+      (int) (0.95 * conf.getLong(RpcServer.MAX_REQUEST_SIZE, RpcServer.DEFAULT_MAX_REQUEST_SIZE));
   }
 
   @Override
@@ -142,7 +150,7 @@ public class RegionReplicaReplicationEndpoint extends HBaseReplicationEndpoint {
       connection = (ClusterConnection) ConnectionFactory.createConnection(this.conf);
       this.pool = getDefaultThreadPool(conf);
       outputSink = new RegionReplicaOutputSink(controller, tableDescriptors, entryBuffers,
-        connection, pool, numWriterThreads, operationTimeout);
+        connection, pool, numWriterThreads, operationTimeout, replicationRpcLimit);
       outputSink.startWriterThreads();
       super.doStart();
     } catch (IOException ex) {
@@ -228,6 +236,7 @@ public class RegionReplicaReplicationEndpoint extends HBaseReplicationEndpoint {
     while (this.isRunning()) {
       try {
         for (Entry entry : replicateContext.getEntries()) {
+          entry.getKey().removeExtendedAttributesWithPrefix("cell.");
           entryBuffers.appendEntry(entry);
         }
         outputSink.flush(); // make sure everything is flushed
@@ -264,10 +273,10 @@ public class RegionReplicaReplicationEndpoint extends HBaseReplicationEndpoint {
 
     public RegionReplicaOutputSink(PipelineController controller, TableDescriptors tableDescriptors,
       EntryBuffers entryBuffers, ClusterConnection connection, ExecutorService pool, int numWriters,
-      int operationTimeout) {
+      int operationTimeout, int replicationRpcLimit) {
       super(controller, entryBuffers, numWriters);
-      this.sinkWriter =
-        new RegionReplicaSinkWriter(this, connection, pool, operationTimeout, tableDescriptors);
+      this.sinkWriter = new RegionReplicaSinkWriter(this, connection, pool, operationTimeout,
+        tableDescriptors, replicationRpcLimit);
       this.tableDescriptors = tableDescriptors;
 
       // A cache for the table "memstore replication enabled" flag.
@@ -381,15 +390,18 @@ public class RegionReplicaReplicationEndpoint extends HBaseReplicationEndpoint {
     RpcControllerFactory rpcControllerFactory;
     RpcRetryingCallerFactory rpcRetryingCallerFactory;
     int operationTimeout;
+    int replicationRpcLimit;
     ExecutorService pool;
     Cache<TableName, Boolean> disabledAndDroppedTables;
     TableDescriptors tableDescriptors;
 
     public RegionReplicaSinkWriter(RegionReplicaOutputSink sink, ClusterConnection connection,
-      ExecutorService pool, int operationTimeout, TableDescriptors tableDescriptors) {
+      ExecutorService pool, int operationTimeout, TableDescriptors tableDescriptors,
+      int replicationRpcLimit) {
       this.sink = sink;
       this.connection = connection;
       this.operationTimeout = operationTimeout;
+      this.replicationRpcLimit = replicationRpcLimit;
       this.rpcRetryingCallerFactory =
         RpcRetryingCallerFactory.instantiate(connection.getConfiguration(),
           connection.getConnectionConfiguration(), connection.getConnectionMetrics());
@@ -512,7 +524,7 @@ public class RegionReplicaReplicationEndpoint extends HBaseReplicationEndpoint {
             : location.getRegionInfo();
           RegionReplicaReplayCallable callable =
             new RegionReplicaReplayCallable(connection, rpcControllerFactory, tableName, location,
-              regionInfo, row, entries, sink.getSkippedEditsCounter());
+              regionInfo, row, entries, sink.getSkippedEditsCounter(), replicationRpcLimit);
           Future<ReplicateWALEntryResponse> task = pool.submit(
             new RetryingRpcCallable<>(rpcRetryingCallerFactory, callable, operationTimeout));
           tasks.add(task);
@@ -600,14 +612,17 @@ public class RegionReplicaReplicationEndpoint extends HBaseReplicationEndpoint {
     private final List<Entry> entries;
     private final byte[] initialEncodedRegionName;
     private final AtomicLong skippedEntries;
+    private final int replicationRpcLimit;
 
     public RegionReplicaReplayCallable(ClusterConnection connection,
       RpcControllerFactory rpcControllerFactory, TableName tableName, HRegionLocation location,
-      RegionInfo regionInfo, byte[] row, List<Entry> entries, AtomicLong skippedEntries) {
+      RegionInfo regionInfo, byte[] row, List<Entry> entries, AtomicLong skippedEntries,
+      int replicationRpcLimit) {
       super(connection, rpcControllerFactory, location, tableName, row, regionInfo.getReplicaId());
       this.entries = entries;
       this.skippedEntries = skippedEntries;
       this.initialEncodedRegionName = regionInfo.getEncodedNameAsBytes();
+      this.replicationRpcLimit = replicationRpcLimit;
     }
 
     @Override
@@ -622,15 +637,19 @@ public class RegionReplicaReplicationEndpoint extends HBaseReplicationEndpoint {
         skip = true;
       }
       if (!this.entries.isEmpty() && !skip) {
-        Entry[] entriesArray = new Entry[this.entries.size()];
-        entriesArray = this.entries.toArray(entriesArray);
-
-        // set the region name for the target region replica
-        Pair<AdminProtos.ReplicateWALEntryRequest, CellScanner> p =
-          ReplicationProtbufUtil.buildReplicateWALEntryRequest(entriesArray,
-            location.getRegionInfo().getEncodedNameAsBytes(), null, null, null);
-        controller.setCellScanner(p.getSecond());
-        return stub.replay(controller, p.getFirst());
+        // Split entries into batches that fit within the RPC size limit to avoid
+        // hbase.ipc.max.request.size errors that would permanently stall replication.
+        for (List<Entry> batch : splitBatches(this.entries)) {
+          Entry[] entriesArray = batch.toArray(new Entry[0]);
+          // set the region name for the target region replica
+          Pair<AdminProtos.ReplicateWALEntryRequest, CellScanner> p =
+            ReplicationProtbufUtil.buildReplicateWALEntryRequest(entriesArray,
+              location.getRegionInfo().getEncodedNameAsBytes(), null, null, null);
+          controller.setCellScanner(p.getSecond());
+          stub.replay(controller, p.getFirst());
+          controller.reset();
+        }
+        return ReplicateWALEntryResponse.newBuilder().build();
       }
 
       if (skip) {
@@ -646,6 +665,27 @@ public class RegionReplicaReplicationEndpoint extends HBaseReplicationEndpoint {
         skippedEntries.addAndGet(entries.size());
       }
       return ReplicateWALEntryResponse.newBuilder().build();
+    }
+
+    private List<List<Entry>> splitBatches(List<Entry> entries) {
+      List<List<Entry>> batches = new ArrayList<>();
+      List<Entry> currentBatch = new ArrayList<>();
+      long currentSize = 0;
+      for (Entry entry : entries) {
+        long entrySize =
+          entry.getKey().estimatedSerializedSizeOf() + entry.getEdit().estimatedSerializedSizeOf();
+        if (currentSize > 0 && currentSize + entrySize > replicationRpcLimit) {
+          batches.add(currentBatch);
+          currentBatch = new ArrayList<>();
+          currentSize = 0;
+        }
+        currentBatch.add(entry);
+        currentSize += entrySize;
+      }
+      if (!currentBatch.isEmpty()) {
+        batches.add(currentBatch);
+      }
+      return batches;
     }
   }
 }
