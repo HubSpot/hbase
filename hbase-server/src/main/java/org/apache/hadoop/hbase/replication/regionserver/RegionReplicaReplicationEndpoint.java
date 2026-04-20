@@ -668,7 +668,6 @@ public class RegionReplicaReplicationEndpoint extends HBaseReplicationEndpoint {
               location.getRegionInfo().getEncodedNameAsBytes(), null, null, null);
           controller.setCellScanner(p.getSecond());
           stub.replay(controller, p.getFirst());
-          controller.reset();
         }
         return ReplicateWALEntryResponse.newBuilder().build();
       }
