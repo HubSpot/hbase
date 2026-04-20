@@ -260,6 +260,27 @@ public class RegionReplicaReplicationEndpoint extends HBaseReplicationEndpoint {
     return true;
   }
 
+  static List<List<Entry>> splitBatches(List<Entry> entries, int replicationRpcLimit) {
+    List<List<Entry>> batches = new ArrayList<>();
+    List<Entry> currentBatch = new ArrayList<>();
+    long currentSize = 0;
+    for (Entry entry : entries) {
+      long entrySize =
+        entry.getKey().estimatedSerializedSizeOf() + entry.getEdit().estimatedSerializedSizeOf();
+      if (currentSize > 0 && currentSize + entrySize > replicationRpcLimit) {
+        batches.add(currentBatch);
+        currentBatch = new ArrayList<>();
+        currentSize = 0;
+      }
+      currentBatch.add(entry);
+      currentSize += entrySize;
+    }
+    if (!currentBatch.isEmpty()) {
+      batches.add(currentBatch);
+    }
+    return batches;
+  }
+
   @Override
   protected WALEntryFilter getScopeWALEntryFilter() {
     // we do not care about scope. We replicate everything.
@@ -639,7 +660,7 @@ public class RegionReplicaReplicationEndpoint extends HBaseReplicationEndpoint {
       if (!this.entries.isEmpty() && !skip) {
         // Split entries into batches that fit within the RPC size limit to avoid
         // hbase.ipc.max.request.size errors that would permanently stall replication.
-        for (List<Entry> batch : splitBatches(this.entries)) {
+        for (List<Entry> batch : splitBatches(this.entries, replicationRpcLimit)) {
           Entry[] entriesArray = batch.toArray(new Entry[0]);
           // set the region name for the target region replica
           Pair<AdminProtos.ReplicateWALEntryRequest, CellScanner> p =
@@ -667,25 +688,5 @@ public class RegionReplicaReplicationEndpoint extends HBaseReplicationEndpoint {
       return ReplicateWALEntryResponse.newBuilder().build();
     }
 
-    private List<List<Entry>> splitBatches(List<Entry> entries) {
-      List<List<Entry>> batches = new ArrayList<>();
-      List<Entry> currentBatch = new ArrayList<>();
-      long currentSize = 0;
-      for (Entry entry : entries) {
-        long entrySize =
-          entry.getKey().estimatedSerializedSizeOf() + entry.getEdit().estimatedSerializedSizeOf();
-        if (currentSize > 0 && currentSize + entrySize > replicationRpcLimit) {
-          batches.add(currentBatch);
-          currentBatch = new ArrayList<>();
-          currentSize = 0;
-        }
-        currentBatch.add(entry);
-        currentSize += entrySize;
-      }
-      if (!currentBatch.isEmpty()) {
-        batches.add(currentBatch);
-      }
-      return batches;
-    }
   }
 }
