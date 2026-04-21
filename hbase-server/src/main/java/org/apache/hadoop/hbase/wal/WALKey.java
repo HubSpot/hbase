@@ -97,12 +97,6 @@ public interface WALKey extends SequenceId, Comparable<WALKey> {
   }
 
   /**
-   * Removes all extended attributes whose keys start with the given prefix.
-   */
-  default void removeExtendedAttributesWithPrefix(String prefix) {
-  }
-
-  /**
    * Produces a string map for this key. Useful for programmatic use and manipulation of the data
    * stored in an WALKeyImpl, for example, printing as JSON.
    * @return a Map containing data from this key

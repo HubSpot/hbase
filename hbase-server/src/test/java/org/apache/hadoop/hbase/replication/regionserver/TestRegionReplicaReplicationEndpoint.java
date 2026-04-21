@@ -437,7 +437,7 @@ public class TestRegionReplicaReplicationEndpoint {
     RegionReplicaReplicationEndpoint.RegionReplicaSinkWriter sinkWriter =
       new RegionReplicaReplicationEndpoint.RegionReplicaSinkWriter(sink,
         (ClusterConnection) connection, Executors.newSingleThreadExecutor(), Integer.MAX_VALUE,
-        fstd, Integer.MAX_VALUE);
+        fstd);
     RegionLocator rl = connection.getRegionLocator(toBeDisabledTable);
     HRegionLocation hrl = rl.getRegionLocation(HConstants.EMPTY_BYTE_ARRAY);
     byte[] encodedRegionName = hrl.getRegionInfo().getEncodedNameAsBytes();
@@ -537,7 +537,7 @@ public class TestRegionReplicaReplicationEndpoint {
       RegionReplicaReplicationEndpoint.RegionReplicaSinkWriter sinkWriter =
         new RegionReplicaReplicationEndpoint.RegionReplicaSinkWriter(sink,
           (ClusterConnection) connection, Executors.newSingleThreadExecutor(), Integer.MAX_VALUE,
-          fstd, Integer.MAX_VALUE);
+          fstd);
 
       Cell cell = CellBuilderFactory.create(CellBuilderType.DEEP_COPY)
         .setRow(Bytes.toBytes("testRow")).setFamily(HBaseTestingUtility.fam1)
@@ -587,7 +587,7 @@ public class TestRegionReplicaReplicationEndpoint {
       RegionReplicaReplicationEndpoint.RegionReplicaSinkWriter sinkWriter =
         new RegionReplicaReplicationEndpoint.RegionReplicaSinkWriter(sink,
           (ClusterConnection) connection, Executors.newSingleThreadExecutor(), Integer.MAX_VALUE,
-          fstd, Integer.MAX_VALUE);
+          fstd);
 
       Cell cell = CellBuilderFactory.create(CellBuilderType.DEEP_COPY)
         .setRow(Bytes.toBytes("testRow")).setFamily(HBaseTestingUtility.fam1)
