@@ -228,6 +228,7 @@ public class RegionReplicaReplicationEndpoint extends HBaseReplicationEndpoint {
     while (this.isRunning()) {
       try {
         for (Entry entry : replicateContext.getEntries()) {
+          entry.getKey().removeExtendedAttributesWithPrefix("cell.");
           entryBuffers.appendEntry(entry);
         }
         outputSink.flush(); // make sure everything is flushed
