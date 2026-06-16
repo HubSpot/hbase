@@ -252,11 +252,16 @@ public abstract class TableBackupClient {
       // If backup session is updated to FAILED state - means we
       // processed recovery already.
       backupManager.updateBackupInfo(backupInfo);
-      backupManager.finishBackupSession();
       LOG.error("Backup " + backupInfo.getBackupId() + " failed.");
     } catch (IOException ee) {
       LOG.error("Please run backup repair tool manually to restore backup system integrity");
       throw ee;
+    } finally {
+      try {
+        backupManager.finishBackupSession();
+      } catch (IOException fe) {
+        LOG.error("Failed to finish backup session", fe);
+      }
     }
   }
 
@@ -267,7 +272,10 @@ public abstract class TableBackupClient {
     // and also clean up export snapshot log files if exist
     if (type == BackupType.FULL) {
       deleteSnapshots(conn, backupInfo, conf);
-      cleanupExportSnapshotLog(conf);
+      BackupPhase phase = backupInfo.getPhase();
+      if (phase == BackupPhase.SNAPSHOTCOPY || phase == BackupPhase.STORE_MANIFEST) {
+        cleanupExportSnapshotLog(conf);
+      }
     }
     BackupSystemTable.restoreFromSnapshot(conn);
     BackupSystemTable.deleteSnapshot(conn);

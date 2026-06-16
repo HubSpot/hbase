@@ -723,12 +723,19 @@ public final class BackupCommands {
           + backupInfo.getStartTs() + ",failedts=" + backupInfo.getCompleteTs() + ",failedphase="
           + backupInfo.getPhase() + ",failedmessage=" + backupInfo.getFailedMsg();
         System.out.println(backupFailedData);
-        TableBackupClient.cleanupAndRestoreBackupSystem(conn, backupInfo, conf);
-        // If backup session is updated to FAILED state - means we
-        // processed recovery already.
-        sysTable.updateBackupInfo(backupInfo);
-        sysTable.finishBackupExclusiveOperation();
-        System.out.println("REPAIR status: finished repair failed session:\n " + backupInfo);
+        try {
+          TableBackupClient.cleanupAndRestoreBackupSystem(conn, backupInfo, conf);
+          // If backup session is updated to FAILED state - means we
+          // processed recovery already.
+          sysTable.updateBackupInfo(backupInfo);
+          System.out.println("REPAIR status: finished repair failed session:\n " + backupInfo);
+        } finally {
+          try {
+            sysTable.finishBackupExclusiveOperation();
+          } catch (IOException fe) {
+            System.err.println("Failed to finish backup exclusive operation: " + fe.getMessage());
+          }
+        }
       }
     }
 
