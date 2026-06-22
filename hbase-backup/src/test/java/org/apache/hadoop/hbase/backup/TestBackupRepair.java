@@ -22,7 +22,9 @@ import static org.junit.Assert.assertTrue;
 
 import java.util.List;
 import java.util.Set;
+import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.HBaseClassTestRule;
+import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.backup.impl.BackupSystemTable;
 import org.apache.hadoop.hbase.backup.impl.TableBackupClient;
@@ -56,6 +58,28 @@ public class TestBackupRepair extends TestBackupBase {
     for (int stage = 0; stage < maxStage; stage++) {
       LOG.info("Running stage " + stage);
       runBackupAndFailAtStageWithRestore(stage);
+    }
+  }
+
+  @Test
+  public void testRepairDoesNotThrowWhenHbaseRootDirAbsentAndPhaseIsRequest() throws Exception {
+    autoRestoreOnFailure = false;
+    conf1.set(TableBackupClient.BACKUP_CLIENT_IMPL_CLASS,
+      FullTableBackupClientForTest.class.getName());
+    conf1.setInt(FullTableBackupClientForTest.BACKUP_TEST_MODE_STAGE, 0);
+    String[] args =
+      new String[] { "create", "full", BACKUP_ROOT_DIR, "-t", table1.getNameAsString() };
+    int ret = ToolRunner.run(conf1, new BackupDriver(), args);
+    assertFalse(ret == 0);
+
+    try (BackupSystemTable sysTable = new BackupSystemTable(TEST_UTIL.getConnection())) {
+      List<BackupInfo> running =
+        sysTable.getBackupHistory(BackupInfo.withState(BackupInfo.BackupState.RUNNING));
+      assertTrue(running.size() == 1);
+      Configuration confWithoutRootDir = new Configuration(conf1);
+      confWithoutRootDir.unset(HConstants.HBASE_DIR);
+      TableBackupClient.cleanupAndRestoreBackupSystem(TEST_UTIL.getConnection(), running.get(0),
+        confWithoutRootDir);
     }
   }
 
