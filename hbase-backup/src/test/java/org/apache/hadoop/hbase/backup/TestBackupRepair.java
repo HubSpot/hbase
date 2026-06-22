@@ -61,6 +61,7 @@ public class TestBackupRepair extends TestBackupBase {
     }
   }
 
+  /** See HBASE-30218. */
   @Test
   public void testRepairDoesNotThrowWhenHbaseRootDirAbsentAndPhaseIsRequest() throws Exception {
     autoRestoreOnFailure = false;
