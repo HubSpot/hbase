@@ -81,6 +81,10 @@ public class TestBackupRepair extends TestBackupBase {
       confWithoutRootDir.unset(HConstants.HBASE_DIR);
       TableBackupClient.cleanupAndRestoreBackupSystem(TEST_UTIL.getConnection(), running.get(0),
         confWithoutRootDir);
+
+      List<BackupInfo> stillRunning =
+        sysTable.getBackupHistory(BackupInfo.withState(BackupInfo.BackupState.RUNNING));
+      assertTrue(stillRunning.isEmpty());
     }
   }
 
