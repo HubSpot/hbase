@@ -19,12 +19,10 @@ package org.apache.hadoop.hbase.backup;
 
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
-
 import java.util.List;
 import java.util.Set;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.HBaseClassTestRule;
-import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.backup.impl.BackupSystemTable;
 import org.apache.hadoop.hbase.backup.impl.TableBackupClient;
@@ -63,7 +61,7 @@ public class TestBackupRepair extends TestBackupBase {
 
   /** See HBASE-30218. */
   @Test
-  public void testRepairDoesNotThrowWhenHbaseRootDirAbsentAndPhaseIsRequest() throws Exception {
+  public void testRepairDoesNotThrowWhenStagingRootAbsentAndPhaseIsRequest() throws Exception {
     autoRestoreOnFailure = false;
     conf1.set(TableBackupClient.BACKUP_CLIENT_IMPL_CLASS,
       FullTableBackupClientForTest.class.getName());
@@ -77,10 +75,10 @@ public class TestBackupRepair extends TestBackupBase {
       List<BackupInfo> running =
         sysTable.getBackupHistory(BackupInfo.withState(BackupInfo.BackupState.RUNNING));
       assertTrue(running.size() == 1);
-      Configuration confWithoutRootDir = new Configuration(conf1);
-      confWithoutRootDir.unset(HConstants.HBASE_DIR);
+      Configuration confWithoutStagingRoot = new Configuration(conf1);
+      confWithoutStagingRoot.unset(BackupRestoreConstants.CONF_STAGING_ROOT);
       TableBackupClient.cleanupAndRestoreBackupSystem(TEST_UTIL.getConnection(), running.get(0),
-        confWithoutRootDir);
+        confWithoutStagingRoot);
 
       List<BackupInfo> stillRunning =
         sysTable.getBackupHistory(BackupInfo.withState(BackupInfo.BackupState.RUNNING));
