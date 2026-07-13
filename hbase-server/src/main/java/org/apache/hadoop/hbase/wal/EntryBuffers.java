@@ -130,9 +130,17 @@ public class EntryBuffers {
 
   public void waitUntilDrained() {
     synchronized (controller.dataAvailable) {
+      long startMs = System.currentTimeMillis();
+      int waitCount = 0;
       while (totalBuffered > 0) {
         try {
           controller.dataAvailable.wait(2000);
+          if (totalBuffered > 0 && ++waitCount % 15 == 0) {
+            LOG.warn(
+              "waitUntilDrained() has been blocked for {}ms with {} bytes still buffered; "
+                + "writer threads may have exited without draining all region buffers",
+              System.currentTimeMillis() - startMs, totalBuffered);
+          }
         } catch (InterruptedException e) {
           LOG.warn("Got interrupted while waiting for EntryBuffers is drained");
           Thread.interrupted();

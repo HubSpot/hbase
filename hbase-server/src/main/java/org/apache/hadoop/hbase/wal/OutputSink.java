@@ -109,7 +109,7 @@ public abstract class OutputSink {
       WriterThread t = writerThreads.get(i);
       if (!t.isAlive()) {
         String threadName = t.getName();
-        LOG.debug("Replacing dead thread: " + threadName);
+        LOG.warn("Writer thread '{}' was found dead and is being replaced", threadName);
         WriterThread newThread = new WriterThread(controller, entryBuffers, this, threadName);
         newThread.start();
         writerThreads.set(i, newThread);
