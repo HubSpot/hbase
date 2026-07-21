@@ -17,14 +17,28 @@
  */
 package org.apache.hadoop.hbase.replication;
 
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
+
+import java.io.IOException;
+import java.util.HashMap;
+import java.util.Map;
 import org.apache.hadoop.hbase.HBaseClassTestRule;
+import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.TableName;
+import org.apache.hadoop.hbase.client.ColumnFamilyDescriptorBuilder;
 import org.apache.hadoop.hbase.client.Put;
+import org.apache.hadoop.hbase.client.RegionInfo;
 import org.apache.hadoop.hbase.client.Table;
+import org.apache.hadoop.hbase.client.TableDescriptorBuilder;
+import org.apache.hadoop.hbase.regionserver.HRegionServer;
 import org.apache.hadoop.hbase.testclassification.LargeTests;
 import org.apache.hadoop.hbase.testclassification.ReplicationTests;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.JVMClusterUtil.RegionServerThread;
+import org.apache.hadoop.hbase.wal.NoEOFWALStreamReader;
+import org.apache.hadoop.hbase.wal.WAL.Entry;
+import org.apache.hadoop.hbase.wal.WALStreamReader;
 import org.junit.Before;
 import org.junit.ClassRule;
 import org.junit.Test;
@@ -177,6 +191,125 @@ public class TestSerialReplicationMultipleRSCrashes extends SerialReplicationTes
 
     enablePeerAndWaitUntilReplicationDone(200);
     checkOrder(200);
+  }
+
+  /**
+   * Head-of-line blocking: Region A's stuck entry in the WAL reader prevents Region B (on the same
+   * RS) from replicating. This reproduces the incident where moving a healthy region onto a stuck
+   * RS caused the healthy region's replication to also stall.
+   * <ol>
+   * <li>Create table with 2 regions (split at row "m")</li>
+   * <li>Write data to Region A (rows starting with "a")</li>
+   * <li>Crash Region A's RS twice with no writes between → gap-1 bug on Region A</li>
+   * <li>Move Region B onto the same RS as Region A</li>
+   * <li>Write data to Region B (rows starting with "z") — these entries go into the same WAL as
+   * Region A's stuck REGION_OPEN marker</li>
+   * <li>Enable peer — Region B's entries are head-of-line blocked behind Region A's stuck
+   * entry</li>
+   * </ol>
+   */
+  @Test
+  public void testRegionMovedOntoStuckRSIsAlsoStuck() throws Exception {
+    TableName tableName = TableName.valueOf(name.getMethodName());
+    byte[] splitKey = Bytes.toBytes("m");
+    UTIL.getAdmin().createTable(
+      TableDescriptorBuilder.newBuilder(tableName)
+        .setColumnFamily(ColumnFamilyDescriptorBuilder.newBuilder(CF)
+          .setScope(HConstants.REPLICATION_SCOPE_GLOBAL).build())
+        .build(),
+      new byte[][] { splitKey });
+    UTIL.waitTableAvailable(tableName);
+
+    RegionInfo regionA =
+      UTIL.getConnection().getRegionLocator(tableName).getAllRegionLocations().stream()
+        .filter(loc -> loc.getRegion().getStartKey().length == 0).findFirst().get().getRegion();
+    RegionInfo regionB =
+      UTIL.getConnection().getRegionLocator(tableName).getAllRegionLocations().stream()
+        .filter(loc -> loc.getRegion().getStartKey().length > 0).findFirst().get().getRegion();
+
+    HRegionServer rsForA = UTIL.getMiniHBaseCluster().getLiveRegionServerThreads().stream()
+      .map(RegionServerThread::getRegionServer)
+      .filter(rs -> rs.getRegion(regionA.getEncodedName()) != null).findFirst().get();
+    HRegionServer rsForB = UTIL.getMiniHBaseCluster().getLiveRegionServerThreads().stream()
+      .map(RegionServerThread::getRegionServer)
+      .filter(rs -> rs.getRegion(regionB.getEncodedName()) != null).findFirst().get();
+
+    // Ensure regions are on different RSes so Region B is not affected by the crashes
+    if (rsForA.getServerName().equals(rsForB.getServerName())) {
+      HRegionServer otherRS = UTIL.getMiniHBaseCluster().getLiveRegionServerThreads().stream()
+        .map(RegionServerThread::getRegionServer)
+        .filter(rs -> !rs.getServerName().equals(rsForA.getServerName())).findFirst().get();
+      moveRegion(regionB, otherRS);
+    }
+
+    // Write data to Region A
+    try (Table table = UTIL.getConnection().getTable(tableName)) {
+      for (int i = 0; i < 100; i++) {
+        table.put(
+          new Put(Bytes.toBytes(String.format("a%04d", i))).addColumn(CF, CQ, Bytes.toBytes(i)));
+      }
+    }
+
+    // Crash Region A's RS twice with no writes between → gap-1 bug
+    abortRSHostingRegion(tableName, regionA);
+    UTIL.waitFor(30000, () -> UTIL.getMiniHBaseCluster().getLiveRegionServerThreads().stream()
+      .anyMatch(t -> t.getRegionServer().getRegion(regionA.getEncodedName()) != null));
+
+    abortRSHostingRegion(tableName, regionA);
+    UTIL.waitFor(30000, () -> UTIL.getMiniHBaseCluster().getLiveRegionServerThreads().stream()
+      .anyMatch(t -> t.getRegionServer().getRegion(regionA.getEncodedName()) != null));
+
+    // Find the RS now hosting Region A and move Region B onto it
+    HRegionServer stuckRS = UTIL.getMiniHBaseCluster().getLiveRegionServerThreads().stream()
+      .map(RegionServerThread::getRegionServer)
+      .filter(rs -> rs.getRegion(regionA.getEncodedName()) != null).findFirst().get();
+    if (stuckRS.getRegion(regionB.getEncodedName()) == null) {
+      moveRegion(regionB, stuckRS);
+    }
+
+    // Write data to Region B — these entries land in the same WAL as Region A's stuck entry
+    try (Table table = UTIL.getConnection().getTable(tableName)) {
+      for (int i = 0; i < 100; i++) {
+        table.put(
+          new Put(Bytes.toBytes(String.format("z%04d", i))).addColumn(CF, CQ, Bytes.toBytes(i)));
+      }
+    }
+
+    // With the bug, Region A's stuck entry blocks the WAL reader, so Region B's
+    // entries are head-of-line blocked and never replicate.
+    enablePeerAndWaitUntilReplicationDone(200);
+    checkOrderPerRegion(200);
+  }
+
+  private void checkOrderPerRegion(int expectedEntries) throws IOException {
+    try (WALStreamReader reader =
+      NoEOFWALStreamReader.create(UTIL.getTestFileSystem(), logPath, UTIL.getConfiguration())) {
+      Map<String, Long> lastSeqIdByRegion = new HashMap<>();
+      int count = 0;
+      for (Entry entry;;) {
+        entry = reader.next();
+        if (entry == null) {
+          break;
+        }
+        String region = Bytes.toString(entry.getKey().getEncodedRegionName());
+        long seqId = entry.getKey().getSequenceId();
+        Long prev = lastSeqIdByRegion.get(region);
+        assertTrue(
+          "Sequence id go backwards for region " + region + " from " + prev + " to " + seqId,
+          prev == null || seqId >= prev);
+        lastSeqIdByRegion.put(region, seqId);
+        count++;
+      }
+      assertEquals(expectedEntries, count);
+    }
+  }
+
+  private void abortRSHostingRegion(TableName tableName, RegionInfo region) throws Exception {
+    RegionServerThread rsThread = UTIL.getMiniHBaseCluster().getLiveRegionServerThreads().stream()
+      .filter(t -> t.getRegionServer().getRegion(region.getEncodedName()) != null).findFirst()
+      .orElseThrow(() -> new RuntimeException("No live RS hosting " + region.getEncodedName()));
+    rsThread.getRegionServer().abort("crash for head-of-line blocking test");
+    rsThread.join();
   }
 
   private void abortRSHostingRegion(TableName tableName) throws Exception {
