@@ -34,11 +34,16 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
+import java.net.InetAddress;
+import java.net.UnknownHostException;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FSDataInputStream;
+import org.apache.hadoop.hdfs.client.HdfsDataInputStream;
+import org.apache.hadoop.hdfs.protocol.DatanodeInfo;
 import org.apache.hadoop.fs.FSDataOutputStream;
 import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.HConstants;
@@ -1521,6 +1526,35 @@ public class HFileBlock implements Cacheable {
      * @see FSReader#readBlockData(long, long, boolean, boolean, boolean) for more details about the
      *      useHeap.
      */
+    private void logChecksumReadMode(FSDataInputStream is, boolean usingHBaseChecksum, long offset) {
+      String datanodeHost = "unknown";
+      boolean isLocal = false;
+      if (is instanceof HdfsDataInputStream) {
+        HdfsDataInputStream hdfsIs = (HdfsDataInputStream) is;
+        DatanodeInfo dn = hdfsIs.getCurrentDatanode();
+        if (dn != null) {
+          datanodeHost = dn.getHostName();
+          try {
+            isLocal = datanodeHost.equals(InetAddress.getLocalHost().getHostName());
+          } catch (UnknownHostException e) {
+            // ignore
+          }
+        }
+      }
+      String locality = isLocal ? "LOCAL (same machine)" : "REMOTE (datanode=" + datanodeHost + ")";
+      if (usingHBaseChecksum) {
+        LOG.warn(
+          "[CHECKSUM-DEBUG] NO-DFS-CHECKSUM read: file={} offset={} locality={}"
+            + " — HBase is doing its own checksum, DFS checksum is SKIPPED",
+          pathName, offset, locality);
+      } else {
+        LOG.warn(
+          "[CHECKSUM-DEBUG] DFS-CHECKSUM read: file={} offset={} locality={}"
+            + " — DFS checksum is ACTIVE (HBase checksum fallback or disabled)",
+          pathName, offset, locality);
+      }
+    }
+
     @Override
     public HFileBlock readBlockData(long offset, long onDiskSizeWithHeaderL, boolean pread,
       boolean updateMetrics, boolean intoHeap) throws IOException {
@@ -1531,6 +1565,7 @@ public class HFileBlock implements Cacheable {
       // guaranteed to use hdfs checksum verification.
       boolean doVerificationThruHBaseChecksum = streamWrapper.shouldUseHBaseChecksum();
       FSDataInputStream is = streamWrapper.getStream(doVerificationThruHBaseChecksum);
+      logChecksumReadMode(is, doVerificationThruHBaseChecksum, offset);
       final Context context = Context.current().with(CONTEXT_KEY,
         new HFileContextAttributesBuilderConsumer(fileContext)
           .setSkipChecksum(doVerificationThruHBaseChecksum)
