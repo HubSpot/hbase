@@ -30,9 +30,9 @@ import java.io.DataInputStream;
 import java.io.DataOutput;
 import java.io.DataOutputStream;
 import java.io.IOException;
-import java.nio.ByteBuffer;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -1541,22 +1541,21 @@ public class HFileBlock implements Cacheable {
       boolean noChecksumFsDistinct = hfs != null && hfs.getNoChecksumFs() != hfs;
       boolean shortCircuitConfigured = noChecksumFsDistinct
         && hfs.getNoChecksumFs().getConf().getBoolean("dfs.client.read.shortcircuit", false);
-      boolean shortCircuitSkipEnabled = noChecksumFsDistinct
-        && hfs.getNoChecksumFs().getConf()
-          .getBoolean("dfs.client.read.shortcircuit.skip.checksum", false);
+      boolean shortCircuitSkipEnabled = noChecksumFsDistinct && hfs.getNoChecksumFs().getConf()
+        .getBoolean("dfs.client.read.shortcircuit.skip.checksum", false);
 
       if (usingHBaseChecksum) {
         LOG.warn(
           "[CHECKSUM-DEBUG] HBase-checksum (DFS SKIPPED): file={} offset={} localHost={}"
             + " noChecksumFsDistinct={} shortCircuitConfigured={} shortCircuitSkipEnabled={}",
-          pathName, offset, LOCAL_HOSTNAME,
-          noChecksumFsDistinct, shortCircuitConfigured, shortCircuitSkipEnabled);
+          pathName, offset, LOCAL_HOSTNAME, noChecksumFsDistinct, shortCircuitConfigured,
+          shortCircuitSkipEnabled);
       } else {
         LOG.warn(
           "[CHECKSUM-DEBUG] DFS-checksum (DFS ACTIVE): file={} offset={} localHost={}"
             + " noChecksumFsDistinct={} shortCircuitConfigured={} shortCircuitSkipEnabled={}",
-          pathName, offset, LOCAL_HOSTNAME,
-          noChecksumFsDistinct, shortCircuitConfigured, shortCircuitSkipEnabled);
+          pathName, offset, LOCAL_HOSTNAME, noChecksumFsDistinct, shortCircuitConfigured,
+          shortCircuitSkipEnabled);
       }
     }
 
