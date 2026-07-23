@@ -303,22 +303,14 @@ public class TestSerialReplicationChecker {
 
   @Test
   public void testCanPushEqualsToBarrierWithGapOne() throws IOException, ReplicationException {
-    // When consecutive barriers differ by 1, the range between them is empty (contains only
-    // the openSeqNum which has no WAL entry). An entry whose seqId matches the later barrier
-    // must not get stuck on the empty range.
     RegionInfo region = RegionInfoBuilder.newBuilder(tableName).build();
     Cell cell = createCell(region);
 
-    // Gap-1 at the end: barriers [10, 100, 101], range [100, 101) is empty
     addStateAndBarrier(region, RegionState.State.OPEN, 10, 100, 101);
-    // Prior range [10, 100) not finished yet — should block
     assertFalse(checker.canPush(createEntry(region, 101), cell));
-    // Finish the prior range [10, 100)
     updatePushedSeqId(region, 99);
-    // Now the empty range [100, 101) should be skipped — should pass
     assertTrue(checker.canPush(createEntry(region, 101), cell));
 
-    // Exact scenario from the Mamba CDC investigation
     addStateAndBarrier(region, RegionState.State.OPEN, 9, 17, 25, 28, 31, 34, 38, 39);
     updatePushedSeqId(region, 37);
     assertTrue(checker.canPush(createEntry(region, 39), cell));

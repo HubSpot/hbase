@@ -45,17 +45,8 @@ import org.junit.Test;
 import org.junit.experimental.categories.Category;
 
 /**
- * Regression tests for HBASE-29499: serial replication stuck when a WAL entry's seqId exactly
- * matches a replication barrier value.
- * <p>
- * When an RS is SIGKILL'ed and the region reopens on a new RS, a REGION_OPEN marker is written to
- * the WAL with a seqId close to the new barrier value. If the RS is killed again, the new barrier
- * can exactly match the REGION_OPEN marker's seqId from the previous incarnation. This causes
- * {@code SerialReplicationChecker.canPush()} to check the wrong barrier endpoint, permanently
- * blocking replication for the affected region.
- * <p>
- * The blocked entry then causes head-of-line blocking: all subsequent entries for that region are
- * also blocked because their "previous range" can never be marked as finished.
+ * Tests that serial replication completes after consecutive RS crashes, including when a region is
+ * moved onto an RS whose WAL reader is stuck.
  */
 @Category({ ReplicationTests.class, LargeTests.class })
 public class TestSerialReplicationMultipleRSCrashes extends SerialReplicationTestBase {
@@ -73,12 +64,6 @@ public class TestSerialReplicationMultipleRSCrashes extends SerialReplicationTes
     }
   }
 
-  /**
-   * Two consecutive RS crashes with data writes between them. After two crashes, the WAL reader
-   * must process entries from the old RS's WAL (via RS_CLAIM_REPLICATION_QUEUE) including
-   * REGION_OPEN markers whose seqIds can match barrier values. Replication must complete for all
-   * entries.
-   */
   @Test
   public void testTwoConsecutiveRSCrashes() throws Exception {
     TableName tableName = createTable();
@@ -111,13 +96,6 @@ public class TestSerialReplicationMultipleRSCrashes extends SerialReplicationTes
     checkOrder(300);
   }
 
-  /**
-   * Two consecutive RS crashes with NO data writes between them. This closely mimics the scenario
-   * from the HBASE-29499 report where the only WAL entries between the first and second crash are
-   * internal markers (REGION_OPEN, COMPACTION). When the second crash happens, the new barrier
-   * value is likely to match the REGION_OPEN marker's seqId from the first restart, because no user
-   * writes advanced the region's sequence counter beyond the open marker.
-   */
   @Test
   public void testTwoConsecutiveRSCrashesNoWritesBetween() throws Exception {
     TableName tableName = createTable();
@@ -144,11 +122,6 @@ public class TestSerialReplicationMultipleRSCrashes extends SerialReplicationTes
     checkOrder(200);
   }
 
-  /**
-   * Three consecutive RS crashes to increase the number of barriers and the probability that a WAL
-   * entry's seqId matches one of them. After three crashes, the replication system must claim and
-   * process queues from two dead RS incarnations plus the current RS's own queue.
-   */
   @Test
   public void testThreeConsecutiveRSCrashes() throws Exception {
     TableName tableName = createTable();
@@ -193,21 +166,6 @@ public class TestSerialReplicationMultipleRSCrashes extends SerialReplicationTes
     checkOrder(200);
   }
 
-  /**
-   * Head-of-line blocking: Region A's stuck entry in the WAL reader prevents Region B (on the same
-   * RS) from replicating. This reproduces the incident where moving a healthy region onto a stuck
-   * RS caused the healthy region's replication to also stall.
-   * <ol>
-   * <li>Create table with 2 regions (split at row "m")</li>
-   * <li>Write data to Region A (rows starting with "a")</li>
-   * <li>Crash Region A's RS twice with no writes between → gap-1 bug on Region A</li>
-   * <li>Move Region B onto the same RS as Region A</li>
-   * <li>Write data to Region B (rows starting with "z") — these entries go into the same WAL as
-   * Region A's stuck REGION_OPEN marker</li>
-   * <li>Enable peer — Region B's entries are head-of-line blocked behind Region A's stuck
-   * entry</li>
-   * </ol>
-   */
   @Test
   public void testRegionMovedOntoStuckRSIsAlsoStuck() throws Exception {
     TableName tableName = TableName.valueOf(name.getMethodName());
@@ -234,7 +192,6 @@ public class TestSerialReplicationMultipleRSCrashes extends SerialReplicationTes
       .map(RegionServerThread::getRegionServer)
       .filter(rs -> rs.getRegion(regionB.getEncodedName()) != null).findFirst().get();
 
-    // Ensure regions are on different RSes so Region B is not affected by the crashes
     if (rsForA.getServerName().equals(rsForB.getServerName())) {
       HRegionServer otherRS = UTIL.getMiniHBaseCluster().getLiveRegionServerThreads().stream()
         .map(RegionServerThread::getRegionServer)
@@ -242,7 +199,6 @@ public class TestSerialReplicationMultipleRSCrashes extends SerialReplicationTes
       moveRegion(regionB, otherRS);
     }
 
-    // Write data to Region A
     try (Table table = UTIL.getConnection().getTable(tableName)) {
       for (int i = 0; i < 100; i++) {
         table.put(
@@ -250,7 +206,6 @@ public class TestSerialReplicationMultipleRSCrashes extends SerialReplicationTes
       }
     }
 
-    // Crash Region A's RS twice with no writes between → gap-1 bug
     abortRSHostingRegion(tableName, regionA);
     UTIL.waitFor(30000, () -> UTIL.getMiniHBaseCluster().getLiveRegionServerThreads().stream()
       .anyMatch(t -> t.getRegionServer().getRegion(regionA.getEncodedName()) != null));
@@ -259,7 +214,6 @@ public class TestSerialReplicationMultipleRSCrashes extends SerialReplicationTes
     UTIL.waitFor(30000, () -> UTIL.getMiniHBaseCluster().getLiveRegionServerThreads().stream()
       .anyMatch(t -> t.getRegionServer().getRegion(regionA.getEncodedName()) != null));
 
-    // Find the RS now hosting Region A and move Region B onto it
     HRegionServer stuckRS = UTIL.getMiniHBaseCluster().getLiveRegionServerThreads().stream()
       .map(RegionServerThread::getRegionServer)
       .filter(rs -> rs.getRegion(regionA.getEncodedName()) != null).findFirst().get();
@@ -267,7 +221,6 @@ public class TestSerialReplicationMultipleRSCrashes extends SerialReplicationTes
       moveRegion(regionB, stuckRS);
     }
 
-    // Write data to Region B — these entries land in the same WAL as Region A's stuck entry
     try (Table table = UTIL.getConnection().getTable(tableName)) {
       for (int i = 0; i < 100; i++) {
         table.put(
@@ -275,8 +228,6 @@ public class TestSerialReplicationMultipleRSCrashes extends SerialReplicationTes
       }
     }
 
-    // With the bug, Region A's stuck entry blocks the WAL reader, so Region B's
-    // entries are head-of-line blocked and never replicate.
     enablePeerAndWaitUntilReplicationDone(200);
     checkOrderPerRegion(200);
   }
@@ -308,7 +259,7 @@ public class TestSerialReplicationMultipleRSCrashes extends SerialReplicationTes
     RegionServerThread rsThread = UTIL.getMiniHBaseCluster().getLiveRegionServerThreads().stream()
       .filter(t -> t.getRegionServer().getRegion(region.getEncodedName()) != null).findFirst()
       .orElseThrow(() -> new RuntimeException("No live RS hosting " + region.getEncodedName()));
-    rsThread.getRegionServer().abort("crash for head-of-line blocking test");
+    rsThread.getRegionServer().abort("for testing");
     rsThread.join();
   }
 
@@ -316,7 +267,7 @@ public class TestSerialReplicationMultipleRSCrashes extends SerialReplicationTes
     RegionServerThread rsThread = UTIL.getMiniHBaseCluster().getLiveRegionServerThreads().stream()
       .filter(t -> !t.getRegionServer().getRegions(tableName).isEmpty()).findFirst()
       .orElseThrow(() -> new RuntimeException("No live RS hosting " + tableName));
-    rsThread.getRegionServer().abort("crash for HBASE-29499 test");
+    rsThread.getRegionServer().abort("for testing");
     rsThread.join();
   }
 }
