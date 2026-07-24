@@ -206,11 +206,11 @@ public class TestSerialReplicationMultipleRSCrashes extends SerialReplicationTes
       }
     }
 
-    abortRSHostingRegion(tableName, regionA);
+    abortRSHostingRegion(regionA);
     UTIL.waitFor(30000, () -> UTIL.getMiniHBaseCluster().getLiveRegionServerThreads().stream()
       .anyMatch(t -> t.getRegionServer().getRegion(regionA.getEncodedName()) != null));
 
-    abortRSHostingRegion(tableName, regionA);
+    abortRSHostingRegion(regionA);
     UTIL.waitFor(30000, () -> UTIL.getMiniHBaseCluster().getLiveRegionServerThreads().stream()
       .anyMatch(t -> t.getRegionServer().getRegion(regionA.getEncodedName()) != null));
 
@@ -246,7 +246,7 @@ public class TestSerialReplicationMultipleRSCrashes extends SerialReplicationTes
         long seqId = entry.getKey().getSequenceId();
         Long prev = lastSeqIdByRegion.get(region);
         assertTrue(
-          "Sequence id go backwards for region " + region + " from " + prev + " to " + seqId,
+          "Sequence id goes backwards for region " + region + " from " + prev + " to " + seqId,
           prev == null || seqId >= prev);
         lastSeqIdByRegion.put(region, seqId);
         count++;
@@ -255,7 +255,7 @@ public class TestSerialReplicationMultipleRSCrashes extends SerialReplicationTes
     }
   }
 
-  private void abortRSHostingRegion(TableName tableName, RegionInfo region) throws Exception {
+  private void abortRSHostingRegion(RegionInfo region) throws Exception {
     RegionServerThread rsThread = UTIL.getMiniHBaseCluster().getLiveRegionServerThreads().stream()
       .filter(t -> t.getRegionServer().getRegion(region.getEncodedName()) != null).findFirst()
       .orElseThrow(() -> new RuntimeException("No live RS hosting " + region.getEncodedName()));
