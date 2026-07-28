@@ -106,9 +106,16 @@ public class HFileSystem extends FilterFileSystem {
     if (useHBaseChecksum && !(fs instanceof LocalFileSystem)) {
       conf = new Configuration(conf);
       conf.setBoolean("dfs.client.read.shortcircuit.skip.checksum", true);
+      LOG.info("HBase checksum enabled: set dfs.client.read.shortcircuit.skip.checksum=true; "
+        + "HDFS will skip checksum verification during short circuit reads");
       this.noChecksumFs = maybeWrapFileSystem(newInstanceFileSystem(conf), conf);
       this.noChecksumFs.setVerifyChecksum(false);
+      LOG.info("Opened noChecksumFs with FS-level checksum verification disabled");
     } else {
+      LOG.info(
+        "HBase checksum not enabled (useHBaseChecksum={}, localFs={}): "
+          + "HDFS checksum verification is active",
+        useHBaseChecksum, (fs instanceof LocalFileSystem));
       this.noChecksumFs = maybeWrapFileSystem(fs, conf);
     }
 

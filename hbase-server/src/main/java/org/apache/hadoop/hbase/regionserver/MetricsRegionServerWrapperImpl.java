@@ -1088,6 +1088,21 @@ class MetricsRegionServerWrapperImpl implements MetricsRegionServerWrapper {
   }
 
   @Override
+  public long getChecksumBytesRead() {
+    return FSDataInputStreamWrapper.getChecksumBytesRead();
+  }
+
+  @Override
+  public long getNoChecksumBytesRead() {
+    return FSDataInputStreamWrapper.getNoChecksumBytesRead();
+  }
+
+  @Override
+  public long getDatanodeMaxTransferThreads() {
+    return regionServer.getConfiguration().getInt("dfs.datanode.max.transfer.threads", 4096);
+  }
+
+  @Override
   public long getBlockedRequestsCount() {
     return aggregate.blockedRequestsCount;
   }

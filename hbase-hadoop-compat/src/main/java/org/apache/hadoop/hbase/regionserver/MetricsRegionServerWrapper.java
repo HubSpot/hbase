@@ -554,6 +554,18 @@ public interface MetricsRegionServerWrapper {
   /** Returns Number of bytes read locally through HDFS zero copy. */
   long getZeroCopyBytesRead();
 
+  /** Returns Number of bytes read with HDFS FS-level checksum enabled. */
+  long getChecksumBytesRead();
+
+  /**
+   * Returns Number of bytes read with HDFS FS-level checksum disabled (HBase checksum or short
+   * circuit).
+   */
+  long getNoChecksumBytesRead();
+
+  /** Returns Configured value of dfs.datanode.max.transfer.threads. */
+  long getDatanodeMaxTransferThreads();
+
   /**
    * Returns Count of requests blocked because the memstore size is larger than blockingMemStoreSize
    */
