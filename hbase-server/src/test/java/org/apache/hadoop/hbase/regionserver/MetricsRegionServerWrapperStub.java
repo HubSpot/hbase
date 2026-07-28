@@ -558,6 +558,21 @@ public class MetricsRegionServerWrapperStub implements MetricsRegionServerWrappe
   }
 
   @Override
+  public long getChecksumBytesRead() {
+    return 0;
+  }
+
+  @Override
+  public long getNoChecksumBytesRead() {
+    return 0;
+  }
+
+  @Override
+  public long getDatanodeMaxTransferThreads() {
+    return 4096;
+  }
+
+  @Override
   public long getBlockedRequestsCount() {
     return 0;
   }
