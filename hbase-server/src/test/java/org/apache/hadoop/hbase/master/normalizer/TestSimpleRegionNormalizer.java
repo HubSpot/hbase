@@ -760,6 +760,7 @@ public class TestSimpleRegionNormalizer {
 
   @Test
   public void testIgnoresSecondaryReplicasForMergeAndSplitPlanning() {
+    final TableName tableName = name.getTableName();
     conf.setBoolean(SPLIT_ENABLED_KEY, true);
     conf.setBoolean(MERGE_ENABLED_KEY, true);
     conf.setInt(MERGE_MIN_REGION_COUNT_KEY, 1);
