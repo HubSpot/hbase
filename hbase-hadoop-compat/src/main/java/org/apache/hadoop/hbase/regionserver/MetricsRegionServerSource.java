@@ -533,6 +533,16 @@ public interface MetricsRegionServerSource extends BaseSource, JvmPauseMonitorSo
   String ZEROCOPY_BYTES_READ = "zeroCopyBytesRead";
   String ZEROCOPY_BYTES_READ_DESC = "The number of bytes read through HDFS zero copy";
 
+  String CHECKSUM_BYTES_READ = "checksumBytesRead";
+  String CHECKSUM_BYTES_READ_DESC =
+    "The number of bytes read using HDFS FS-level checksum verification (non-short-circuit path)";
+  String NO_CHECKSUM_BYTES_READ = "noChecksumBytesRead";
+  String NO_CHECKSUM_BYTES_READ_DESC =
+    "The number of bytes read with HDFS FS-level checksum disabled (HBase checksum or short circuit path)";
+  String DATANODE_MAX_TRANSFER_THREADS = "datanodeMaxTransferThreads";
+  String DATANODE_MAX_TRANSFER_THREADS_DESC =
+    "Configured value of dfs.datanode.max.transfer.threads; used to track the impact of changing this setting";
+
   String LOCAL_RACK_BYTES_READ = "localRackBytesRead";
   String LOCAL_RACK_BYTES_READ_DESC =
     "The number of bytes read from the same rack of the RegionServer, but not the local HDFS DataNode";

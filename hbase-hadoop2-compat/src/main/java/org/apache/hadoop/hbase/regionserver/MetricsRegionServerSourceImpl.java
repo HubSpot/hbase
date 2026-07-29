@@ -568,6 +568,12 @@ public class MetricsRegionServerSourceImpl extends BaseSourceImpl
         rsWrap.getShortCircuitBytesRead())
       .addGauge(Interns.info(ZEROCOPY_BYTES_READ, ZEROCOPY_BYTES_READ_DESC),
         rsWrap.getZeroCopyBytesRead())
+      .addGauge(Interns.info(CHECKSUM_BYTES_READ, CHECKSUM_BYTES_READ_DESC),
+        rsWrap.getChecksumBytesRead())
+      .addGauge(Interns.info(NO_CHECKSUM_BYTES_READ, NO_CHECKSUM_BYTES_READ_DESC),
+        rsWrap.getNoChecksumBytesRead())
+      .addGauge(Interns.info(DATANODE_MAX_TRANSFER_THREADS, DATANODE_MAX_TRANSFER_THREADS_DESC),
+        rsWrap.getDatanodeMaxTransferThreads())
       .addGauge(Interns.info(SPLIT_QUEUE_LENGTH, SPLIT_QUEUE_LENGTH_DESC),
         rsWrap.getSplitQueueSize())
       .addGauge(Interns.info(COMPACTION_QUEUE_LENGTH, COMPACTION_QUEUE_LENGTH_DESC),

@@ -86,6 +86,8 @@ public class FSDataInputStreamWrapper implements Closeable {
     long totalLocalBytesRead;
     long totalShortCircuitBytesRead;
     long totalZeroCopyBytesRead;
+    long totalChecksumBytesRead;
+    long totalNoChecksumBytesRead;
   }
 
   protected Path readerPath;
@@ -230,7 +232,7 @@ public class FSDataInputStreamWrapper implements Closeable {
     }
   }
 
-  private void updateInputStreamStatistics(FSDataInputStream stream) {
+  private void updateInputStreamStatistics(FSDataInputStream stream, boolean fsChecksumEnabled) {
     // If the underlying file system is HDFS, update read statistics upon close.
     if (stream instanceof HdfsDataInputStream) {
       /**
@@ -240,14 +242,19 @@ public class FSDataInputStreamWrapper implements Closeable {
        */
       HdfsDataInputStream hdfsDataInputStream = (HdfsDataInputStream) stream;
       synchronized (readStatistics) {
-        readStatistics.totalBytesRead +=
-          hdfsDataInputStream.getReadStatistics().getTotalBytesRead();
+        long bytesRead = hdfsDataInputStream.getReadStatistics().getTotalBytesRead();
+        readStatistics.totalBytesRead += bytesRead;
         readStatistics.totalLocalBytesRead +=
           hdfsDataInputStream.getReadStatistics().getTotalLocalBytesRead();
         readStatistics.totalShortCircuitBytesRead +=
           hdfsDataInputStream.getReadStatistics().getTotalShortCircuitBytesRead();
         readStatistics.totalZeroCopyBytesRead +=
           hdfsDataInputStream.getReadStatistics().getTotalZeroCopyBytesRead();
+        if (fsChecksumEnabled) {
+          readStatistics.totalChecksumBytesRead += bytesRead;
+        } else {
+          readStatistics.totalNoChecksumBytesRead += bytesRead;
+        }
       }
     }
   }
@@ -276,17 +283,29 @@ public class FSDataInputStreamWrapper implements Closeable {
     }
   }
 
+  public static long getChecksumBytesRead() {
+    synchronized (readStatistics) {
+      return readStatistics.totalChecksumBytesRead;
+    }
+  }
+
+  public static long getNoChecksumBytesRead() {
+    synchronized (readStatistics) {
+      return readStatistics.totalNoChecksumBytesRead;
+    }
+  }
+
   /** CloseClose stream(s) if necessary. */
   @Override
   public void close() {
     if (!doCloseStreams) {
       return;
     }
-    updateInputStreamStatistics(this.streamNoFsChecksum);
+    updateInputStreamStatistics(this.streamNoFsChecksum, false);
     // we do not care about the close exception as it is for reading, no data loss issue.
     Closeables.closeQuietly(streamNoFsChecksum);
 
-    updateInputStreamStatistics(stream);
+    updateInputStreamStatistics(stream, true);
     Closeables.closeQuietly(stream);
   }
 
