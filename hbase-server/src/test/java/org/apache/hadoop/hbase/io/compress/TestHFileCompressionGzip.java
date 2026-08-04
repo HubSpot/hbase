@@ -54,8 +54,8 @@ public class TestHFileCompressionGzip extends HFileTestBase {
     conf.setBoolean("hbase.io.compress.gz.allowByteBuffDecompression", false);
     Compression.Algorithm.GZ.reload(conf);
 
-    Path path =
-      new Path(TEST_UTIL.getDataTestDir(), HBaseTestingUtility.getRandomUUID().toString() + ".hfile");
+    Path path = new Path(TEST_UTIL.getDataTestDir(),
+      HBaseTestingUtility.getRandomUUID().toString() + ".hfile");
     doTest(conf, path, Compression.Algorithm.GZ);
   }
 
@@ -64,8 +64,8 @@ public class TestHFileCompressionGzip extends HFileTestBase {
     conf.setBoolean("hbase.io.compress.gz.allowByteBuffDecompression", true);
     Compression.Algorithm.GZ.reload(conf);
 
-    Path path =
-      new Path(TEST_UTIL.getDataTestDir(), HBaseTestingUtility.getRandomUUID().toString() + ".hfile");
+    Path path = new Path(TEST_UTIL.getDataTestDir(),
+      HBaseTestingUtility.getRandomUUID().toString() + ".hfile");
     doTest(conf, path, Compression.Algorithm.GZ);
   }
 
