@@ -20,44 +20,47 @@ package org.apache.hadoop.hbase.io.compress;
 import edu.umd.cs.findbugs.annotations.Nullable;
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
-import java.util.zip.CRC32;
-import java.util.zip.DataFormatException;
-import java.util.zip.Inflater;
 import org.apache.hadoop.hbase.nio.ByteBuff;
 import org.apache.hadoop.hbase.nio.SingleByteBuff;
-import org.apache.yetus.audience.InterfaceAudience;
+import org.apache.hadoop.io.compress.zlib.ZlibDecompressor;
 
 /**
- * Glue for ByteBuffDecompressor on top of {@link Inflater}. Only supports gzip members with the
- * fixed ten-byte header that {@link ReusableStreamGzipCodec} (and Hadoop's native zlib gzip
- * compressor) always writes, i.e. no FEXTRA/FNAME/FCOMMENT/FHCRC, since that is the only format
- * HBase ever produces on the compression side.
+ * Glue for ByteBuffDecompressor on top of Hadoop's native
+ * {@link ZlibDecompressor.ZlibDirectDecompressor}.
  */
-@InterfaceAudience.Private
+@InterfaceAudienc.Private
 public class GzipByteBuffDecompressor implements ByteBuffDecompressor {
 
   private static final int GZIP_HEADER_LENGTH = 10;
   private static final int GZIP_TRAILER_LENGTH = 8;
-  private static final byte GZIP_MAGIC_0 = (byte) 0x1f;
-  private static final byte GZIP_MAGIC_1 = (byte) 0x8b;
 
-  private final Inflater inflater = new Inflater(true);
+  @Nullable
+  private final ZlibDecompressor.ZlibDirectDecompressor decompressor;
   // Intended to be set to false by some unit tests
   private boolean allowByteBuffDecompression;
 
-  GzipByteBuffDecompressor() {
+  GzipByteBuffDecompressor(boolean nativeZlibLoaded) {
+    decompressor = nativeZlibLoaded
+      ? new ZlibDecompressor.ZlibDirectDecompressor(ZlibDecompressor.CompressionHeader.GZIP_FORMAT,
+        0)
+      : null;
     allowByteBuffDecompression = true;
   }
 
   @Override
   public boolean canDecompress(ByteBuff output, ByteBuff input) {
-    return allowByteBuffDecompression && output instanceof SingleByteBuff
-      && input instanceof SingleByteBuff;
+    return decompressor != null && allowByteBuffDecompression && output instanceof SingleByteBuff
+      && input instanceof SingleByteBuff && output.nioByteBuffers()[0].isDirect()
+      && input.nioByteBuffers()[0].isDirect();
   }
 
   @Override
   public int decompress(ByteBuff output, ByteBuff input, int inputLen) throws IOException {
+    if (decompressor == null) {
+      throw new IllegalStateException(
+        "GzipByteBuffDecompressor#decompress() was called but Hadoop's native zlib library is "
+          + "not loaded, this should never happen since canDecompress() would have returned false");
+    }
     if (!(output instanceof SingleByteBuff) || !(input instanceof SingleByteBuff)) {
       throw new IllegalStateException(
         "At least one buffer is not a SingleByteBuff, this is not supported");
@@ -67,74 +70,44 @@ public class GzipByteBuffDecompressor implements ByteBuffDecompressor {
     }
 
     ByteBuffer nioInput = input.nioByteBuffers()[0];
-    int inputStart = nioInput.position();
-    if (nioInput.get(inputStart) != GZIP_MAGIC_0 || nioInput.get(inputStart + 1) != GZIP_MAGIC_1) {
-      throw new IOException("Not a gzip member, bad magic bytes");
-    }
-
     ByteBuffer nioOutput = output.nioByteBuffers()[0];
-
-    // Isolate the raw DEFLATE payload (strip the fixed header and the CRC32/ISIZE trailer) into
-    // its own view so Inflater can consume it without disturbing nioInput's own position/limit.
-    ByteBuffer deflateStream = nioInput.duplicate();
-    deflateStream.limit(inputStart + inputLen - GZIP_TRAILER_LENGTH);
-    deflateStream.position(inputStart + GZIP_HEADER_LENGTH);
-
-    inflater.reset();
-    inflater.setInput(deflateStream);
-    int outputStart = nioOutput.position();
-    try {
-      while (!inflater.finished()) {
-        if (inflater.inflate(nioOutput) == 0) {
-          if (inflater.finished()) {
-            break;
-          }
-          if (inflater.needsInput()) {
-            throw new IOException("Unexpected end of gzip stream");
-          }
-          if (!nioOutput.hasRemaining()) {
-            throw new IOException("Output buffer is too small for the decompressed gzip stream");
-          }
-        }
-      }
-    } catch (DataFormatException e) {
-      throw new IOException("Invalid gzip stream", e);
+    if (!nioInput.isDirect() || !nioOutput.isDirect()) {
+      throw new IllegalStateException(
+        "At least one buffer is not direct, this is not supported by the native zlib decompressor");
     }
 
-    int decompressedLength = nioOutput.position() - outputStart;
-    verifyTrailer(nioInput, inputStart, inputLen, nioOutput, outputStart, decompressedLength);
+    int inputStart = nioInput.position();
+    int outputStart = nioOutput.position();
+
+    // Duplicate so the decompressor can advance its own position without disturbing nioInput.
+    // The native decompressor consumes the whole gzip member, including the header and the
+    // CRC32/ISIZE trailer, and validates the trailer itself.
+    ByteBuffer gzipMember = nioInput.duplicate();
+    gzipMember.limit(inputStart + inputLen);
+
+    decompressor.reset();
+    while (!decompressor.finished()) {
+      int outputRemainingBefore = nioOutput.remaining();
+      try {
+        decompressor.decompress(gzipMember, nioOutput);
+      } catch (IOException e) {
+        throw new IOException("Invalid gzip stream: " + e.getMessage(), e);
+      }
+      // No progress means either the output buffer is full or the gzip member is truncated.
+      if (nioOutput.remaining() == outputRemainingBefore && !decompressor.finished()) {
+        if (!nioOutput.hasRemaining()) {
+          throw new IOException("Output buffer is too small for the decompressed gzip stream");
+        }
+        throw new IOException("Unexpected end of gzip stream");
+      }
+    }
+
+    if (gzipMember.hasRemaining()) {
+      throw new IOException("Unexpected trailing bytes after decompressing gzip stream");
+    }
 
     nioInput.position(inputStart + inputLen);
-    return decompressedLength;
-  }
-
-  /**
-   * {@link Inflater} runs in nowrap mode and never looks at the gzip header or trailer, so this is
-   * the only place the CRC32 and ISIZE fields of the trailer are ever checked. Catches the case
-   * where the raw DEFLATE payload decoded "successfully" (no {@link DataFormatException}) but
-   * produced the wrong bytes or the wrong number of bytes.
-   */
-  private void verifyTrailer(ByteBuffer nioInput, int inputStart, int inputLen,
-    ByteBuffer nioOutput, int outputStart, int decompressedLength) throws IOException {
-    ByteBuffer trailer = nioInput.duplicate().order(ByteOrder.LITTLE_ENDIAN);
-    trailer.position(inputStart + inputLen - GZIP_TRAILER_LENGTH);
-    int expectedCrc32 = trailer.getInt();
-    int expectedISize = trailer.getInt();
-
-    if (decompressedLength != expectedISize) {
-      throw new IOException("Decompressed length " + decompressedLength
-        + " does not match gzip trailer ISIZE " + expectedISize);
-    }
-
-    CRC32 crc32 = new CRC32();
-    ByteBuffer writtenOutput = nioOutput.duplicate();
-    writtenOutput.limit(nioOutput.position());
-    writtenOutput.position(outputStart);
-    crc32.update(writtenOutput);
-    if ((int) crc32.getValue() != expectedCrc32) {
-      throw new IOException(
-        "Decompressed data's CRC32 does not match gzip trailer CRC32, " + "data is corrupt");
-    }
+    return nioOutput.position() - outputStart;
   }
 
   @Override
@@ -154,7 +127,9 @@ public class GzipByteBuffDecompressor implements ByteBuffDecompressor {
 
   @Override
   public void close() {
-    inflater.end();
+    if (decompressor != null) {
+      decompressor.end();
+    }
   }
 
 }

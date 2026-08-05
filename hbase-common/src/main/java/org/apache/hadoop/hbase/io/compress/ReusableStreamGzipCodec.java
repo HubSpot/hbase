@@ -188,7 +188,7 @@ public class ReusableStreamGzipCodec extends GzipCodec implements ByteBuffDecomp
 
   @Override
   public ByteBuffDecompressor createByteBuffDecompressor() {
-    return new GzipByteBuffDecompressor();
+    return new GzipByteBuffDecompressor(ZlibFactory.isNativeZlibLoaded(getConf()));
   }
 
   @Override
