@@ -23,12 +23,13 @@ import java.nio.ByteBuffer;
 import org.apache.hadoop.hbase.nio.ByteBuff;
 import org.apache.hadoop.hbase.nio.SingleByteBuff;
 import org.apache.hadoop.io.compress.zlib.ZlibDecompressor;
+import org.apache.yetus.audience.InterfaceAudience;
 
 /**
  * Glue for ByteBuffDecompressor on top of Hadoop's native
  * {@link ZlibDecompressor.ZlibDirectDecompressor}.
  */
-@InterfaceAudienc.Private
+@InterfaceAudience.Private
 public class GzipByteBuffDecompressor implements ByteBuffDecompressor {
 
   private static final int GZIP_HEADER_LENGTH = 10;
