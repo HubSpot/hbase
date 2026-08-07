@@ -18,12 +18,15 @@
 package org.apache.hadoop.hbase.backup;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.testclassification.SmallTests;
 import org.junit.jupiter.api.Tag;
@@ -34,6 +37,11 @@ public class TestBackupInfoSerialization {
 
   private static BackupInfo newIncrementalBackupInfo() {
     return new BackupInfo("backup_1234567890", BackupType.INCREMENTAL,
+      new TableName[] { TableName.valueOf("t1") }, "/hbase/backup");
+  }
+
+  private static BackupInfo newFullBackupInfo() {
+    return new BackupInfo("backup_1234567890", BackupType.FULL,
       new TableName[] { TableName.valueOf("t1") }, "/hbase/backup");
   }
 
@@ -90,5 +98,83 @@ public class TestBackupInfoSerialization {
     BackupInfo withoutFiles = newIncrementalBackupInfo();
 
     assertTrue(!withFiles.equals(withoutFiles));
+  }
+
+  @Test
+  public void testTotalBytesCopiedSurvivesRoundTrip() throws IOException {
+    BackupInfo original = newIncrementalBackupInfo();
+    original.setTotalBytesCopied(9876543210L);
+
+    BackupInfo roundTripped = BackupInfo.fromByteArray(original.toByteArray());
+
+    assertEquals(9876543210L, roundTripped.getTotalBytesCopied());
+  }
+
+  @Test
+  public void testNoChecksumVerifySurvivesRoundTripWhenTrue() throws IOException {
+    BackupInfo original = newIncrementalBackupInfo();
+    original.setNoChecksumVerify(true);
+
+    BackupInfo roundTripped = BackupInfo.fromByteArray(original.toByteArray());
+
+    assertTrue(roundTripped.getNoChecksumVerify());
+  }
+
+  @Test
+  public void testNoChecksumVerifySurvivesRoundTripWhenFalse() throws IOException {
+    BackupInfo original = newIncrementalBackupInfo();
+    original.setNoChecksumVerify(false);
+
+    BackupInfo roundTripped = BackupInfo.fromByteArray(original.toByteArray());
+
+    assertFalse(roundTripped.getNoChecksumVerify());
+  }
+
+  @Test
+  public void testIncrTimestampMapSurvivesRoundTrip() throws IOException {
+    Map<String, Long> t1Timestamps = new HashMap<>();
+    t1Timestamps.put("host1.example.com:16020", 100L);
+    t1Timestamps.put("host2.example.com:16020", 200L);
+    Map<String, Long> t2Timestamps = new HashMap<>();
+    t2Timestamps.put("host1.example.com:16020", 300L);
+
+    Map<TableName, Map<String, Long>> incrTimestampMap = new HashMap<>();
+    incrTimestampMap.put(TableName.valueOf("t1"), t1Timestamps);
+    incrTimestampMap.put(TableName.valueOf("t2"), t2Timestamps);
+
+    BackupInfo original = newIncrementalBackupInfo();
+    original.setIncrTimestampMap(incrTimestampMap);
+
+    BackupInfo roundTripped = BackupInfo.fromByteArray(original.toByteArray());
+
+    assertEquals(incrTimestampMap, roundTripped.getIncrTimestampMap());
+  }
+
+  @Test
+  public void testUnsetIncrTimestampMapRemainsNull() throws IOException {
+    BackupInfo original = newIncrementalBackupInfo();
+
+    BackupInfo roundTripped = BackupInfo.fromByteArray(original.toByteArray());
+
+    assertNull(roundTripped.getIncrTimestampMap());
+  }
+
+  @Test
+  public void testIncrementalBackupRetainsHLogTargetDir() throws IOException {
+    BackupInfo original = newIncrementalBackupInfo();
+
+    BackupInfo roundTripped = BackupInfo.fromByteArray(original.toByteArray());
+
+    assertEquals(original.getHLogTargetDir(), roundTripped.getHLogTargetDir());
+  }
+
+  @Test
+  public void testFullBackupHasNoHLogTargetDir() throws IOException {
+    BackupInfo original = newFullBackupInfo();
+    assertNull(original.getHLogTargetDir());
+
+    BackupInfo roundTripped = BackupInfo.fromByteArray(original.toByteArray());
+
+    assertNull(roundTripped.getHLogTargetDir());
   }
 }
