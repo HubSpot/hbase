@@ -40,6 +40,7 @@ import org.apache.hadoop.hbase.mapreduce.TableMapReduceUtil;
 import org.apache.hadoop.hbase.snapshot.SnapshotRegionLocator;
 import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
 import org.apache.hadoop.hbase.util.MapReduceExtendedCell;
+import org.apache.hadoop.hbase.util.OrderPreservedMapReduceExtendedCell;
 import org.apache.hadoop.io.NullWritable;
 import org.apache.hadoop.io.WritableComparable;
 import org.apache.hadoop.mapreduce.Job;
@@ -78,18 +79,27 @@ public class MapReduceHFileSplitterJob extends Configured implements Tool {
   static class HFileCellMapper extends Mapper<NullWritable, Cell, WritableComparable<?>, Cell> {
 
     private boolean diskBasedSortingEnabled = false;
+    private int order = 0;
 
     @Override
     public void map(NullWritable key, Cell value, Context context)
       throws IOException, InterruptedException {
       ExtendedCell extendedCell = (ExtendedCell) value;
-      context.write(wrap(extendedCell), new MapReduceExtendedCell(extendedCell));
+      context.write(wrap(extendedCell), wrapCell(extendedCell, order));
+      ++order;
     }
 
     @Override
     public void setup(Context context) throws IOException {
       diskBasedSortingEnabled =
         HFileOutputFormat2.diskBasedSortingEnabled(context.getConfiguration());
+    }
+
+    private MapReduceExtendedCell wrapCell(ExtendedCell cell, int order) {
+      if (diskBasedSortingEnabled) {
+        return new OrderPreservedMapReduceExtendedCell(cell, order);
+      }
+      return new MapReduceExtendedCell(cell);
     }
 
     private WritableComparable<?> wrap(ExtendedCell cell) {
@@ -138,12 +148,13 @@ public class MapReduceHFileSplitterJob extends Configured implements Tool {
       job.setMapperClass(HFileCellMapper.class);
       if (diskBasedSortingEnabled) {
         job.setReducerClass(PreSortedCellsReducer.class);
+        job.setMapOutputValueClass(OrderPreservedMapReduceExtendedCell.class);
       } else {
         job.setReducerClass(CellSortReducer.class);
+        job.setMapOutputValueClass(MapReduceExtendedCell.class);
       }
       Path outputDir = new Path(hfileOutPath);
       FileOutputFormat.setOutputPath(job, outputDir);
-      job.setMapOutputValueClass(MapReduceExtendedCell.class);
       try (Connection conn = ConnectionFactory.createConnection(conf);
         Table table = conn.getTable(tableName);
         RegionLocator regionLocator = getRegionLocator(conf, conn, tableName)) {
