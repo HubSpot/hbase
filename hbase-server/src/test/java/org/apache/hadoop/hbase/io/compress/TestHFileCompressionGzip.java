@@ -19,31 +19,26 @@ package org.apache.hadoop.hbase.io.compress;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
-import org.apache.hadoop.hbase.HBaseClassTestRule;
-import org.apache.hadoop.hbase.HBaseTestingUtility;
+import org.apache.hadoop.hbase.HBaseTestingUtil;
 import org.apache.hadoop.hbase.testclassification.IOTests;
 import org.apache.hadoop.hbase.testclassification.SmallTests;
-import org.junit.Before;
-import org.junit.BeforeClass;
-import org.junit.ClassRule;
-import org.junit.Test;
-import org.junit.experimental.categories.Category;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Test;
 
-@Category({ IOTests.class, SmallTests.class })
+@Tag(IOTests.TAG)
+@Tag(SmallTests.TAG)
 public class TestHFileCompressionGzip extends HFileTestBase {
-
-  @ClassRule
-  public static final HBaseClassTestRule CLASS_RULE =
-    HBaseClassTestRule.forClass(TestHFileCompressionGzip.class);
 
   private static Configuration conf;
 
-  @BeforeClass
+  @BeforeAll
   public static void setUpBeforeClass() throws Exception {
     HFileTestBase.setUpBeforeClass();
   }
 
-  @Before
+  @BeforeEach
   public void setUp() throws Exception {
     conf = TEST_UTIL.getConfiguration();
     HFileTestBase.setUpBeforeClass();
@@ -54,8 +49,8 @@ public class TestHFileCompressionGzip extends HFileTestBase {
     conf.setBoolean("hbase.io.compress.gz.allowByteBuffDecompression", false);
     Compression.Algorithm.GZ.reload(conf);
 
-    Path path = new Path(TEST_UTIL.getDataTestDir(),
-      HBaseTestingUtility.getRandomUUID().toString() + ".hfile");
+    Path path =
+      new Path(TEST_UTIL.getDataTestDir(), HBaseTestingUtil.getRandomUUID().toString() + ".hfile");
     doTest(conf, path, Compression.Algorithm.GZ);
   }
 
@@ -64,8 +59,8 @@ public class TestHFileCompressionGzip extends HFileTestBase {
     conf.setBoolean("hbase.io.compress.gz.allowByteBuffDecompression", true);
     Compression.Algorithm.GZ.reload(conf);
 
-    Path path = new Path(TEST_UTIL.getDataTestDir(),
-      HBaseTestingUtility.getRandomUUID().toString() + ".hfile");
+    Path path =
+      new Path(TEST_UTIL.getDataTestDir(), HBaseTestingUtil.getRandomUUID().toString() + ".hfile");
     doTest(conf, path, Compression.Algorithm.GZ);
   }
 
