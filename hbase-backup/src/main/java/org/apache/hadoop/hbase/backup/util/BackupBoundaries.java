@@ -30,26 +30,20 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Tracks time boundaries for WAL file cleanup during backup operations. Maintains the oldest
- * timestamp per RegionServer included in any backup, enabling safe determination of which WAL files
- * can be deleted without compromising backup integrity.
+ * Tracks WAL cleanup boundaries separately for each backup root to ensure WALs are only deleted
+ * when ALL backup roots no longer need them. A WAL file can only be deleted if it is older than the
+ * boundary for every backup root, protecting WALs needed by any root even when other roots have
+ * already backed up that host at a later timestamp.
  */
 @InterfaceAudience.Private
 public class BackupBoundaries {
   private static final Logger LOG = LoggerFactory.getLogger(BackupBoundaries.class);
+  private static final BackupBoundaries EMPTY = new BackupBoundaries(Collections.emptyMap());
 
-  // This map tracks, for every RegionServer, the least recent (= oldest / lowest timestamp)
-  // inclusion in any backup. In other words, it is the timestamp boundary up to which all backup
-  // roots have included the WAL in their backup.
-  private final Map<Address, Long> boundaries;
+  private final Map<String, BoundaryInfo> rootBoundaries;
 
-  // The fallback cleanup boundary for RegionServers without explicit backup boundaries
-  // (e.g., servers that joined after backups began can be checked against this boundary)
-  private final long defaultBoundary;
-
-  private BackupBoundaries(Map<Address, Long> boundaries, long defaultBoundary) {
-    this.boundaries = boundaries;
-    this.defaultBoundary = defaultBoundary;
+  private BackupBoundaries(Map<String, BoundaryInfo> rootBoundaries) {
+    this.rootBoundaries = rootBoundaries;
   }
 
   public boolean isDeletable(Path walLogPath) {
@@ -66,32 +60,16 @@ public class BackupBoundaries {
       Address address = Address.fromString(hostname);
       long pathTs = WAL.getTimestamp(walLogPath.getName());
 
-      if (!boundaries.containsKey(address)) {
-        boolean isDeletable = pathTs <= defaultBoundary;
-        if (LOG.isDebugEnabled()) {
-          LOG.debug(
-            "Boundary for {} not found. isDeletable = {} based on defaultBoundary = {} and WAL ts of {}",
-            walLogPath, isDeletable, defaultBoundary, pathTs);
+      for (Map.Entry<String, BoundaryInfo> entry : rootBoundaries.entrySet()) {
+        if (!entry.getValue().isDeletable(address, pathTs)) {
+          if (LOG.isDebugEnabled()) {
+            LOG.debug("Backup root {} preventing deletion of {} with ts {}", entry.getKey(),
+              walLogPath, pathTs);
+          }
+          return false;
         }
-        return isDeletable;
       }
-
-      long backupTs = boundaries.get(address);
-      if (pathTs <= backupTs) {
-        if (LOG.isDebugEnabled()) {
-          LOG.debug(
-            "WAL cleanup time-boundary found for server {}: {}. Ok to delete older file: {}",
-            address.getHostName(), pathTs, walLogPath);
-        }
-        return true;
-      }
-
-      if (LOG.isDebugEnabled()) {
-        LOG.debug("WAL cleanup time-boundary found for server {}: {}. Keeping younger file: {}",
-          address.getHostName(), backupTs, walLogPath);
-      }
-
-      return false;
+      return true;
     } catch (Exception e) {
       LOG.warn("Error occurred while filtering file: {}. Ignoring cleanup of this log", walLogPath,
         e);
@@ -99,56 +77,80 @@ public class BackupBoundaries {
     }
   }
 
-  public Map<Address, Long> getBoundaries() {
-    return boundaries;
-  }
-
-  public long getDefaultBoundary() {
-    return defaultBoundary;
+  public void logAllBoundaries() {
+    for (Map.Entry<String, BoundaryInfo> entry : rootBoundaries.entrySet()) {
+      entry.getValue().logBoundaries(entry.getKey());
+    }
   }
 
   public static BackupBoundariesBuilder builder(long tsCleanupBuffer) {
     return new BackupBoundariesBuilder(tsCleanupBuffer);
   }
 
-  public static class BackupBoundariesBuilder {
-    private final Map<Address, Long> boundaries = new HashMap<>();
-    private final long tsCleanupBuffer;
+  public static class BoundaryInfo {
+    private final Map<Address, Long> boundaries;
+    private final long defaultBoundary;
 
-    private long oldestStartTs = Long.MAX_VALUE;
+    private BoundaryInfo(Map<Address, Long> boundaries, long defaultBoundary) {
+      this.boundaries = boundaries;
+      this.defaultBoundary = defaultBoundary;
+    }
+
+    public boolean isDeletable(Address address, long pathTs) {
+      Long boundary = boundaries.get(address);
+      if (boundary == null) {
+        return pathTs <= defaultBoundary;
+      }
+      return pathTs <= boundary;
+    }
+
+    public void logBoundaries(String rootDir) {
+      LOG.debug("Backup root: {}, defaultBoundary: {}", rootDir, defaultBoundary);
+      for (Map.Entry<Address, Long> entry : boundaries.entrySet()) {
+        LOG.debug("Backup root: {}, Server: {}, WAL cleanup boundary: {}", rootDir,
+          entry.getKey().getHostName(), entry.getValue());
+      }
+    }
+  }
+
+  public static class BackupBoundariesBuilder {
+    private final Map<String, PerRootState> perRootStates = new HashMap<>();
+    private final long tsCleanupBuffer;
 
     private BackupBoundariesBuilder(long tsCleanupBuffer) {
       this.tsCleanupBuffer = tsCleanupBuffer;
     }
 
     /**
-     * Updates the boundaries based on the provided backup info.
+     * Updates the boundaries based on the provided backup info. Boundaries are tracked per backup
+     * root so that each root independently protects the WALs it still needs.
      * @param backupInfo the most recent completed backup info for a backup root, or if there is no
      *                   such completed backup, the currently running backup.
      */
     public void update(BackupInfo backupInfo) {
+      PerRootState state =
+        perRootStates.computeIfAbsent(backupInfo.getBackupRootDir(), k -> new PerRootState());
+
       switch (backupInfo.getState()) {
         case COMPLETE:
-          // If a completed backup exists in the backup root, we want to protect all logs that
-          // have been created since the log-roll that happened for that backup.
           for (TableName table : backupInfo.getTableSetTimestampMap().keySet()) {
             for (Map.Entry<String, Long> entry : backupInfo.getTableSetTimestampMap().get(table)
               .entrySet()) {
               Address regionServerAddress = Address.fromString(entry.getKey());
               Long logRollTs = entry.getValue();
 
-              Long storedTs = boundaries.get(regionServerAddress);
+              Long storedTs = state.boundaries.get(regionServerAddress);
               if (storedTs == null || logRollTs < storedTs) {
-                boundaries.put(regionServerAddress, logRollTs);
+                state.boundaries.put(regionServerAddress, logRollTs);
+                if (logRollTs < state.oldestRollTs) {
+                  state.oldestRollTs = logRollTs;
+                }
               }
             }
           }
           break;
         case RUNNING:
-          // If there is NO completed backup in the backup root, there are no persisted log-roll
-          // timestamps available yet. But, we still want to protect all files that have been
-          // created since the start of the currently running backup.
-          oldestStartTs = Math.min(oldestStartTs, backupInfo.getStartTs());
+          state.oldestStartTs = Math.min(state.oldestStartTs, backupInfo.getStartTs());
           break;
         default:
           throw new IllegalStateException("Unexpected backupInfo state: " + backupInfo.getState());
@@ -156,14 +158,28 @@ public class BackupBoundaries {
     }
 
     public BackupBoundaries build() {
-      if (boundaries.isEmpty()) {
-        long defaultBoundary = oldestStartTs - tsCleanupBuffer;
-        return new BackupBoundaries(Collections.emptyMap(), defaultBoundary);
+      if (perRootStates.isEmpty()) {
+        return EMPTY;
       }
 
-      long oldestRollTs = Collections.min(boundaries.values());
-      long defaultBoundary = Math.min(oldestRollTs, oldestStartTs) - tsCleanupBuffer;
-      return new BackupBoundaries(boundaries, defaultBoundary);
+      Map<String, BoundaryInfo> rootBoundaries = new HashMap<>();
+      for (Map.Entry<String, PerRootState> entry : perRootStates.entrySet()) {
+        PerRootState state = entry.getValue();
+        long defaultBoundary;
+        if (state.boundaries.isEmpty()) {
+          defaultBoundary = state.oldestStartTs - tsCleanupBuffer;
+        } else {
+          defaultBoundary = Math.min(state.oldestRollTs, state.oldestStartTs) - tsCleanupBuffer;
+        }
+        rootBoundaries.put(entry.getKey(), new BoundaryInfo(state.boundaries, defaultBoundary));
+      }
+      return new BackupBoundaries(rootBoundaries);
+    }
+
+    private static class PerRootState {
+      final Map<Address, Long> boundaries = new HashMap<>();
+      long oldestStartTs = Long.MAX_VALUE;
+      long oldestRollTs = Long.MAX_VALUE;
     }
   }
 }
