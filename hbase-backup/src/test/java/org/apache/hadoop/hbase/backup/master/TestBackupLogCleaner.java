@@ -294,6 +294,7 @@ public class TestBackupLogCleaner extends TestBackupBase {
   public void testCanDeleteFileWithNewServerWALs() {
     BackupInfo backup = new BackupInfo();
     backup.setState(BackupInfo.BackupState.COMPLETE);
+    backup.setBackupRootDir("s3://backup-root1");
     backup.setTableSetTimestampMap(Collections.singletonMap(TableName.valueOf("table1"),
       Collections.singletonMap("server1:60020", 1000000L)));
     BackupBoundaries boundaries =
@@ -324,6 +325,7 @@ public class TestBackupLogCleaner extends TestBackupBase {
   public void testFirstBackupProtectsFiles() {
     BackupInfo backup = new BackupInfo();
     backup.setBackupId("backup_1");
+    backup.setBackupRootDir("s3://backup-root1");
     backup.setState(BackupInfo.BackupState.RUNNING);
     backup.setStartTs(100L);
     // Running backups have no TableSetTimestampMap
@@ -345,6 +347,7 @@ public class TestBackupLogCleaner extends TestBackupBase {
     // In this case, a region-server-specific timestamp is available, so the buffer is not used.
     BackupInfo backup2 = new BackupInfo();
     backup2.setBackupId("backup_2");
+    backup2.setBackupRootDir("s3://backup-root1");
     backup2.setState(BackupInfo.BackupState.COMPLETE);
     backup2.setStartTs(80L);
     backup2.setTableSetTimestampMap(Collections.singletonMap(TableName.valueOf("table1"),
@@ -358,6 +361,57 @@ public class TestBackupLogCleaner extends TestBackupBase {
     assertTrue(BackupLogCleaner.canDeleteFile(boundaries, path));
     path = new Path("/hbase/oldWALs/server1%2C60020%2C12345.91");
     assertFalse(BackupLogCleaner.canDeleteFile(boundaries, path));
+  }
+
+  @Test
+  public void testMultiRootBoundariesProtectsWALsNeededByAnyRoot() {
+    // Root A has backed up both server1 and server2
+    BackupInfo backupA = new BackupInfo();
+    backupA.setBackupId("backup_A");
+    backupA.setBackupRootDir("s3://root-A");
+    backupA.setState(BackupInfo.BackupState.COMPLETE);
+    Map<String, Long> rootATimestamps = new HashMap<>();
+    rootATimestamps.put("server1:60020", 2000L);
+    rootATimestamps.put("server2:60020", 2000L);
+    backupA.setTableSetTimestampMap(
+      Collections.singletonMap(TableName.valueOf("table1"), rootATimestamps));
+
+    // Root B has only backed up server1, at an earlier timestamp
+    BackupInfo backupB = new BackupInfo();
+    backupB.setBackupId("backup_B");
+    backupB.setBackupRootDir("s3://root-B");
+    backupB.setState(BackupInfo.BackupState.COMPLETE);
+    backupB.setTableSetTimestampMap(Collections.singletonMap(TableName.valueOf("table1"),
+      Collections.singletonMap("server1:60020", 1000L)));
+
+    BackupBoundaries boundaries =
+      BackupLogCleaner.calculatePreservationBoundary(Arrays.asList(backupA, backupB), 0L);
+
+    // server1 WAL at 500: before both boundaries -> deletable
+    Path server1Old = new Path("/hbase/oldWALs/server1%2C60020%2C12345.500");
+    assertTrue(BackupLogCleaner.canDeleteFile(boundaries, server1Old),
+      "WAL before both roots' boundaries should be deletable");
+
+    // server1 WAL at 1500: after root B's boundary (1000) -> NOT deletable
+    Path server1Between = new Path("/hbase/oldWALs/server1%2C60020%2C12345.1500");
+    assertFalse(BackupLogCleaner.canDeleteFile(boundaries, server1Between),
+      "WAL after root B's boundary should NOT be deletable even though root A allows it");
+
+    // server2 WAL at 1500: root A has boundary 2000 (ok), but root B has never backed up
+    // server2 so root B's defaultBoundary (min of its rollTs=1000) should prevent deletion
+    Path server2Between = new Path("/hbase/oldWALs/server2%2C60020%2C12345.1500");
+    assertFalse(BackupLogCleaner.canDeleteFile(boundaries, server2Between),
+      "WAL for server2 should NOT be deletable because root B hasn't backed up server2");
+
+    // server2 WAL at 500: before root B's defaultBoundary (1000) -> deletable
+    Path server2Old = new Path("/hbase/oldWALs/server2%2C60020%2C12345.500");
+    assertTrue(BackupLogCleaner.canDeleteFile(boundaries, server2Old),
+      "WAL before all boundaries should be deletable");
+
+    // server2 WAL at 2500: after root A's boundary -> NOT deletable
+    Path server2New = new Path("/hbase/oldWALs/server2%2C60020%2C12345.2500");
+    assertFalse(BackupLogCleaner.canDeleteFile(boundaries, server2New),
+      "WAL after root A's boundary should NOT be deletable");
   }
 
   @Test

@@ -42,7 +42,6 @@ import org.apache.hadoop.hbase.master.HMaster;
 import org.apache.hadoop.hbase.master.MasterServices;
 import org.apache.hadoop.hbase.master.cleaner.BaseLogCleanerDelegate;
 import org.apache.hadoop.hbase.master.region.MasterRegionFactory;
-import org.apache.hadoop.hbase.net.Address;
 import org.apache.hadoop.hbase.procedure2.store.wal.WALProcedureStore;
 import org.apache.yetus.audience.InterfaceAudience;
 import org.slf4j.Logger;
@@ -124,11 +123,7 @@ public class BackupLogCleaner extends BaseLogCleanerDelegate {
     BackupBoundaries boundaries = builder.build();
 
     if (LOG.isDebugEnabled()) {
-      LOG.debug("Boundaries defaultBoundary: {}", boundaries.getDefaultBoundary());
-      for (Map.Entry<Address, Long> entry : boundaries.getBoundaries().entrySet()) {
-        LOG.debug("Server: {}, WAL cleanup boundary: {}", entry.getKey().getHostName(),
-          entry.getValue());
-      }
+      boundaries.logAllBoundaries();
     }
 
     return boundaries;
