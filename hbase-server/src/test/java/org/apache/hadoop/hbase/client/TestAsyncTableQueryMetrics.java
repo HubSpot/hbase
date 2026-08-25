@@ -112,6 +112,25 @@ public class TestAsyncTableQueryMetrics {
     }
 
     Assert.assertEquals(getClusterBlockBytesScanned(), bbs);
+
+    g1.setCheckExistenceOnly(true);
+    g2.setCheckExistenceOnly(true);
+    g3.setCheckExistenceOnly(true);
+
+    result = CONN.getTable(TABLE_NAME).get(g1).get();
+    Assert.assertEquals(Boolean.TRUE, result.getExists());
+    Assert.assertNotNull(result.getMetrics());
+    bbs += result.getMetrics().getBlockBytesScanned();
+    Assert.assertEquals(getClusterBlockBytesScanned(), bbs);
+
+    futures = CONN.getTable(TABLE_NAME).get(ImmutableList.of(g1, g2, g3));
+    for (CompletableFuture<Result> future : futures) {
+      result = future.join();
+      Assert.assertEquals(Boolean.TRUE, result.getExists());
+      Assert.assertNotNull(result.getMetrics());
+      bbs += result.getMetrics().getBlockBytesScanned();
+    }
+    Assert.assertEquals(getClusterBlockBytesScanned(), bbs);
   }
 
   @Test
