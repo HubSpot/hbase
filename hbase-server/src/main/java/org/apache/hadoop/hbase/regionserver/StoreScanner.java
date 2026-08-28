@@ -1156,6 +1156,12 @@ public class StoreScanner extends NonReversedNonLazyKeyValueScanner
       newHeap = newKVHeap(newCurrentScanners, comparator);
     } catch (Exception e) {
       LOG.warn("failed to switch to stream read", e);
+      if (isMissingFileException(e)) {
+        RegionServerServices rss = store.getHRegion().getRegionServerServices();
+        if (rss != null && rss.getRpcServer() != null) {
+          rss.getRpcServer().getMetrics().missingFileException();
+        }
+      }
       if (fileScanners != null) {
         fileScanners.forEach(KeyValueScanner::close);
       }
@@ -1166,6 +1172,17 @@ public class StoreScanner extends NonReversedNonLazyKeyValueScanner
     this.heap = newHeap;
     resetQueryMatcher(lastTop);
     scannersToClose.forEach(KeyValueScanner::close);
+  }
+
+  private static boolean isMissingFileException(Exception e) {
+    for (Throwable t = e; t != null; t = t.getCause()) {
+      String msg = t.getMessage();
+      if (msg != null
+        && (msg.contains("ReplicaNotFoundException") || msg.contains("StoreFileNotFoundException"))) {
+        return true;
+      }
+    }
+    return false;
   }
 
   protected final boolean checkFlushed() {
