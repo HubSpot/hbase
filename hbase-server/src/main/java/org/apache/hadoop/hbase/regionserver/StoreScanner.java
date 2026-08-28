@@ -1189,8 +1189,10 @@ public class StoreScanner extends NonReversedNonLazyKeyValueScanner
   private static boolean isMissingFileException(Exception e) {
     for (Throwable t = e; t != null; t = t.getCause()) {
       String msg = t.getMessage();
-      if (msg != null
-        && (msg.contains("ReplicaNotFoundException") || msg.contains("StoreFileNotFoundException"))) {
+      if (
+        msg != null && (msg.contains("ReplicaNotFoundException")
+          || msg.contains("StoreFileNotFoundException"))
+      ) {
         return true;
       }
     }
