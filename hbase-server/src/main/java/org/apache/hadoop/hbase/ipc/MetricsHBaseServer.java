@@ -155,6 +155,10 @@ public class MetricsHBaseServer {
     }
   }
 
+  public void missingFileException() {
+    source.missingFileException();
+  }
+
   void callTimedOut() {
     source.callTimedOut();
   }
