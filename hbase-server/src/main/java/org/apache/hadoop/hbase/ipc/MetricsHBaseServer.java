@@ -41,6 +41,8 @@ import org.slf4j.LoggerFactory;
 public class MetricsHBaseServer {
   private static final Logger LOG = LoggerFactory.getLogger(MetricsHBaseServer.class);
 
+  private static final int MAX_CAUSE_DEPTH = 10;
+
   private MetricsHBaseServerSource source;
   private MetricsHBaseServerWrapper serverWrapper;
 
@@ -148,6 +150,8 @@ public class MetricsHBaseServer {
       } else if (throwable instanceof RequestTooBigException) {
         source.requestTooBigException();
       } else if (hasCause(throwable, FileNotFoundException.class)) {
+        LOG.debug("FileNotFoundException found in the cause chain: {}", throwable.getMessage(),
+          throwable);
         source.fileNotFoundExceptions();
       } else {
         source.otherExceptions();
@@ -171,12 +175,15 @@ public class MetricsHBaseServer {
   }
 
   private static boolean hasCause(Throwable t, Class<? extends Throwable> causeType) {
-    Throwable cause = t;
-    while (cause != null) {
+    int depth = 0;
+    for (Throwable cause = t; cause != null && depth < MAX_CAUSE_DEPTH; cause =
+      cause.getCause(), depth++) {
       if (causeType.isInstance(cause)) {
         return true;
       }
-      cause = cause.getCause();
+    }
+    if (depth >= MAX_CAUSE_DEPTH) {
+      LOG.warn("Cause chain exceeded {} levels, possible cycle", MAX_CAUSE_DEPTH, t);
     }
     return false;
   }

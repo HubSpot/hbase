@@ -193,6 +193,31 @@ public class TestRpcMetrics {
     mrpc.exception(new IOException("some other failure"));
     HELPER.assertCounter("exceptions.fileNotFoundExceptions", 2, serverSource);
     HELPER.assertCounter("exceptions.otherExceptions", 1, serverSource);
+    HELPER.assertCounter("exceptions", 3, serverSource);
+  }
+
+  @Test
+  public void itDoesNotWalkCauseChainBeyondMaxDepth() {
+    MetricsHBaseServer mrpc =
+      new MetricsHBaseServer("HRegionServer", new MetricsHBaseServerWrapperStub());
+    MetricsHBaseServerSource serverSource = mrpc.getMetricsSource();
+
+    // FileNotFoundException at depth 11 — beyond MAX_CAUSE_DEPTH — should not be found
+    Throwable deep = new FileNotFoundException("/hbase/data/table/region/cf/hfile");
+    for (int i = 0; i < 10; i++) {
+      deep = new IOException("wrapper " + i, deep);
+    }
+    mrpc.exception(deep);
+    HELPER.assertCounter("exceptions.fileNotFoundExceptions", 0, serverSource);
+    HELPER.assertCounter("exceptions.otherExceptions", 1, serverSource);
+
+    // FileNotFoundException at depth 10 — exactly at MAX_CAUSE_DEPTH — should be found
+    Throwable withinCap = new FileNotFoundException("/hbase/data/table/region/cf/hfile");
+    for (int i = 0; i < 9; i++) {
+      withinCap = new IOException("wrapper " + i, withinCap);
+    }
+    mrpc.exception(withinCap);
+    HELPER.assertCounter("exceptions.fileNotFoundExceptions", 1, serverSource);
   }
 
   private class FakeException extends DoNotRetryIOException {
