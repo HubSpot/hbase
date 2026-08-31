@@ -41,6 +41,7 @@ public class ExceptionTrackingSourceImpl extends BaseSourceImpl implements Excep
   protected MutableFastCounter exceptionsCallTimedOut;
   protected MutableFastCounter exceptionRequestTooBig;
   protected MutableFastCounter otherExceptions;
+  protected MutableFastCounter exceptionsFileNotFound;
 
   public ExceptionTrackingSourceImpl(String metricsName, String metricsDescription,
     String metricsContext, String metricsJmxContext) {
@@ -81,6 +82,8 @@ public class ExceptionTrackingSourceImpl extends BaseSourceImpl implements Excep
       this.getMetricsRegistry().newCounter(EXCEPTIONS_REQUEST_TOO_BIG, EXCEPTIONS_TYPE_DESC, 0L);
     this.otherExceptions =
       this.getMetricsRegistry().newCounter(OTHER_EXCEPTIONS, EXCEPTIONS_TYPE_DESC, 0L);
+    this.exceptionsFileNotFound =
+      this.getMetricsRegistry().newCounter(EXCEPTIONS_FILE_NOT_FOUND, EXCEPTIONS_TYPE_DESC, 0L);
   }
 
   @Override
@@ -161,5 +164,10 @@ public class ExceptionTrackingSourceImpl extends BaseSourceImpl implements Excep
   @Override
   public void otherExceptions() {
     otherExceptions.incr();
+  }
+
+  @Override
+  public void fileNotFoundExceptions() {
+    exceptionsFileNotFound.incr();
   }
 }

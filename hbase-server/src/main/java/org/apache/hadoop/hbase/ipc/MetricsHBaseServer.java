@@ -17,6 +17,7 @@
  */
 package org.apache.hadoop.hbase.ipc;
 
+import java.io.FileNotFoundException;
 import org.apache.hadoop.hbase.CallDroppedException;
 import org.apache.hadoop.hbase.CallQueueTooBigException;
 import org.apache.hadoop.hbase.CompatibilitySingletonFactory;
@@ -146,6 +147,8 @@ public class MetricsHBaseServer {
         source.callDroppedException();
       } else if (throwable instanceof RequestTooBigException) {
         source.requestTooBigException();
+      } else if (hasCause(throwable, FileNotFoundException.class)) {
+        source.fileNotFoundExceptions();
       } else {
         source.otherExceptions();
         if (LOG.isDebugEnabled()) {
@@ -165,5 +168,16 @@ public class MetricsHBaseServer {
 
   public MetricsHBaseServerWrapper getHBaseServerWrapper() {
     return serverWrapper;
+  }
+
+  private static boolean hasCause(Throwable t, Class<? extends Throwable> causeType) {
+    Throwable cause = t;
+    while (cause != null) {
+      if (causeType.isInstance(cause)) {
+        return true;
+      }
+      cause = cause.getCause();
+    }
+    return false;
   }
 }

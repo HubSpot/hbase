@@ -47,6 +47,7 @@ public interface ExceptionTrackingSource extends BaseSource {
   String EXCEPTIONS_CALL_TIMED_OUT = "exceptions.callTimedOut";
   String EXCEPTIONS_REQUEST_TOO_BIG = "exceptions.requestTooBig";
   String OTHER_EXCEPTIONS = "exceptions.otherExceptions";
+  String EXCEPTIONS_FILE_NOT_FOUND = "exceptions.fileNotFoundExceptions";
 
   void exception();
 
@@ -82,4 +83,6 @@ public interface ExceptionTrackingSource extends BaseSource {
   void requestTooBigException();
 
   void otherExceptions();
+
+  void fileNotFoundExceptions();
 }

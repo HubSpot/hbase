@@ -19,6 +19,8 @@ package org.apache.hadoop.hbase.ipc;
 
 import static org.junit.Assert.assertEquals;
 
+import java.io.FileNotFoundException;
+import java.io.IOException;
 import org.apache.hadoop.hbase.CallDroppedException;
 import org.apache.hadoop.hbase.CompatibilityFactory;
 import org.apache.hadoop.hbase.DoNotRetryIOException;
@@ -167,6 +169,30 @@ public class TestRpcMetrics {
     HELPER.assertCounter("exceptions.requestTooBig", 1, serverSource);
     HELPER.assertCounter("exceptions.otherExceptions", 1, serverSource);
     HELPER.assertCounter("exceptions", 8, serverSource);
+  }
+
+  @Test
+  public void itCountsFileNotFoundExceptionsInCauseChain() {
+    MetricsHBaseServer mrpc =
+      new MetricsHBaseServer("HRegionServer", new MetricsHBaseServerWrapperStub());
+    MetricsHBaseServerSource serverSource = mrpc.getMetricsSource();
+
+    // Direct FileNotFoundException
+    mrpc.exception(new FileNotFoundException("/hbase/data/table/region/cf/hfile"));
+    HELPER.assertCounter("exceptions.fileNotFoundExceptions", 1, serverSource);
+
+    // FileNotFoundException buried in cause chain — mirrors the critsit path through
+    // BlockIOUtils.preadWithExtraDirectly reflection wrapping
+    IOException critsitLike = new IOException("Could not seek StoreFileScanner[...]",
+      new IOException("Encountered an exception when invoking ByteBuffer positioned read",
+        new FileNotFoundException("/hbase/data/table/region/cf/hfile")));
+    mrpc.exception(critsitLike);
+    HELPER.assertCounter("exceptions.fileNotFoundExceptions", 2, serverSource);
+
+    // Unrelated IOException should still go to otherExceptions, not fileNotFoundExceptions
+    mrpc.exception(new IOException("some other failure"));
+    HELPER.assertCounter("exceptions.fileNotFoundExceptions", 2, serverSource);
+    HELPER.assertCounter("exceptions.otherExceptions", 1, serverSource);
   }
 
   private class FakeException extends DoNotRetryIOException {
