@@ -150,8 +150,10 @@ public class MetricsHBaseServer {
       } else if (throwable instanceof RequestTooBigException) {
         source.requestTooBigException();
       } else if (hasCause(throwable, FileNotFoundException.class)) {
-        LOG.debug("FileNotFoundException found in the cause chain: {}", throwable.getMessage(),
-          throwable);
+        if (LOG.isDebugEnabled()) {
+          LOG.debug("FileNotFoundException found in the cause chain: {}", throwable.getMessage(),
+            throwable);
+        }
         source.fileNotFoundExceptions();
       } else {
         source.otherExceptions();
