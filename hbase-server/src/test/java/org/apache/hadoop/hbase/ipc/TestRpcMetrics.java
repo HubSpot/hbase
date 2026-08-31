@@ -172,37 +172,44 @@ public class TestRpcMetrics {
   }
 
   @Test
-  public void itCountsFileNotFoundExceptionsInCauseChain() {
+  public void itCountsFileNotFoundException() {
     MetricsHBaseServer mrpc =
       new MetricsHBaseServer("HRegionServer", new MetricsHBaseServerWrapperStub());
     MetricsHBaseServerSource serverSource = mrpc.getMetricsSource();
-
-    // Direct FileNotFoundException
     mrpc.exception(new FileNotFoundException("/hbase/data/table/region/cf/hfile"));
     HELPER.assertCounter("exceptions.fileNotFoundExceptions", 1, serverSource);
+    HELPER.assertCounter("exceptions", 1, serverSource);
+  }
 
-    // FileNotFoundException buried in cause chain — mirrors the critsit path through
-    // BlockIOUtils.preadWithExtraDirectly reflection wrapping
+  @Test
+  public void itCountsBuriedFileNotFoundException() {
+    MetricsHBaseServer mrpc =
+      new MetricsHBaseServer("HRegionServer", new MetricsHBaseServerWrapperStub());
+    MetricsHBaseServerSource serverSource = mrpc.getMetricsSource();
     IOException critsitLike = new IOException("Could not seek StoreFileScanner[...]",
       new IOException("Encountered an exception when invoking ByteBuffer positioned read",
         new FileNotFoundException("/hbase/data/table/region/cf/hfile")));
     mrpc.exception(critsitLike);
-    HELPER.assertCounter("exceptions.fileNotFoundExceptions", 2, serverSource);
-
-    // Unrelated IOException should still go to otherExceptions, not fileNotFoundExceptions
-    mrpc.exception(new IOException("some other failure"));
-    HELPER.assertCounter("exceptions.fileNotFoundExceptions", 2, serverSource);
-    HELPER.assertCounter("exceptions.otherExceptions", 1, serverSource);
-    HELPER.assertCounter("exceptions", 3, serverSource);
+    HELPER.assertCounter("exceptions.fileNotFoundExceptions", 1, serverSource);
+    HELPER.assertCounter("exceptions", 1, serverSource);
   }
 
   @Test
-  public void itDoesNotWalkCauseChainBeyondMaxDepth() {
+  public void itDoesNotCountUnrelatedIOException() {
     MetricsHBaseServer mrpc =
       new MetricsHBaseServer("HRegionServer", new MetricsHBaseServerWrapperStub());
     MetricsHBaseServerSource serverSource = mrpc.getMetricsSource();
+    mrpc.exception(new IOException("some other failure"));
+    HELPER.assertCounter("exceptions.fileNotFoundExceptions", 0, serverSource);
+    HELPER.assertCounter("exceptions.otherExceptions", 1, serverSource);
+    HELPER.assertCounter("exceptions", 1, serverSource);
+  }
 
-    // FileNotFoundException at depth 11 — beyond MAX_CAUSE_DEPTH — should not be found
+  @Test
+  public void itDoesNotFindExceptionBeyondMaxDepth() {
+    MetricsHBaseServer mrpc =
+      new MetricsHBaseServer("HRegionServer", new MetricsHBaseServerWrapperStub());
+    MetricsHBaseServerSource serverSource = mrpc.getMetricsSource();
     Throwable deep = new FileNotFoundException("/hbase/data/table/region/cf/hfile");
     for (int i = 0; i < 10; i++) {
       deep = new IOException("wrapper " + i, deep);
@@ -210,14 +217,21 @@ public class TestRpcMetrics {
     mrpc.exception(deep);
     HELPER.assertCounter("exceptions.fileNotFoundExceptions", 0, serverSource);
     HELPER.assertCounter("exceptions.otherExceptions", 1, serverSource);
+    HELPER.assertCounter("exceptions", 1, serverSource);
+  }
 
-    // FileNotFoundException at depth 10 — exactly at MAX_CAUSE_DEPTH — should be found
+  @Test
+  public void itFindsExceptionAtMaxDepth() {
+    MetricsHBaseServer mrpc =
+      new MetricsHBaseServer("HRegionServer", new MetricsHBaseServerWrapperStub());
+    MetricsHBaseServerSource serverSource = mrpc.getMetricsSource();
     Throwable withinCap = new FileNotFoundException("/hbase/data/table/region/cf/hfile");
     for (int i = 0; i < 9; i++) {
       withinCap = new IOException("wrapper " + i, withinCap);
     }
     mrpc.exception(withinCap);
     HELPER.assertCounter("exceptions.fileNotFoundExceptions", 1, serverSource);
+    HELPER.assertCounter("exceptions", 1, serverSource);
   }
 
   private class FakeException extends DoNotRetryIOException {
