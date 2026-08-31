@@ -171,6 +171,8 @@ public class TestRpcMetrics {
     HELPER.assertCounter("exceptions", 8, serverSource);
   }
 
+  // ---------- FILE NOT FOUND EXCEPTIONS -------------------
+
   @Test
   public void itCountsFileNotFoundException() {
     MetricsHBaseServer mrpc =
@@ -211,7 +213,7 @@ public class TestRpcMetrics {
       new MetricsHBaseServer("HRegionServer", new MetricsHBaseServerWrapperStub());
     MetricsHBaseServerSource serverSource = mrpc.getMetricsSource();
     Throwable deep = new FileNotFoundException("/hbase/data/table/region/cf/hfile");
-    for (int i = 0; i < 10; i++) {
+    for (int i = 0; i < MetricsHBaseServer.MAX_CAUSE_DEPTH; i++) {
       deep = new IOException("wrapper " + i, deep);
     }
     mrpc.exception(deep);
@@ -226,7 +228,7 @@ public class TestRpcMetrics {
       new MetricsHBaseServer("HRegionServer", new MetricsHBaseServerWrapperStub());
     MetricsHBaseServerSource serverSource = mrpc.getMetricsSource();
     Throwable withinCap = new FileNotFoundException("/hbase/data/table/region/cf/hfile");
-    for (int i = 0; i < 9; i++) {
+    for (int i = 0; i < MetricsHBaseServer.MAX_CAUSE_DEPTH - 1; i++) {
       withinCap = new IOException("wrapper " + i, withinCap);
     }
     mrpc.exception(withinCap);

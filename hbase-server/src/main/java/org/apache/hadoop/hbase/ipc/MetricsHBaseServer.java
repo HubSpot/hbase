@@ -41,7 +41,7 @@ import org.slf4j.LoggerFactory;
 public class MetricsHBaseServer {
   private static final Logger LOG = LoggerFactory.getLogger(MetricsHBaseServer.class);
 
-  private static final int MAX_CAUSE_DEPTH = 10;
+  static final int MAX_CAUSE_DEPTH = 10;
 
   private MetricsHBaseServerSource source;
   private MetricsHBaseServerWrapper serverWrapper;
