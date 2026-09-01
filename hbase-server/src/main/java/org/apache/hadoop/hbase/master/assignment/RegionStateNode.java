@@ -176,6 +176,17 @@ public class RegionStateNode implements Comparable<RegionStateNode> {
     return regionInfo.isSplit() || isInState(State.SPLIT);
   }
 
+  /**
+   * Throws if this region is a split parent. Split parents are permanently retired and must never
+   * be assigned regardless of their persisted state in meta.
+   */
+  public void checkNotRetired() throws DoNotRetryRegionException {
+    if (isSplit()) {
+      throw new DoNotRetryRegionException(
+        regionInfo.getEncodedName() + " is a split parent and cannot be assigned");
+    }
+  }
+
   public long getLastUpdate() {
     TransitRegionStateProcedure proc = this.procedure;
     if (proc != null) {

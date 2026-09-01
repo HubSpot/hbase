@@ -741,10 +741,7 @@ public class AssignmentManager {
       throw new HBaseIOException(
         regionNode + " is currently in transition; pid=" + regionNode.getProcedure().getProcId());
     }
-    if (regionNode.isSplit()) {
-      throw new DoNotRetryRegionException(
-        regionNode.getRegionInfo().getEncodedName() + " is a split parent and cannot be assigned");
-    }
+    regionNode.checkNotRetired();
     if (!regionNode.isInState(expectedStates)) {
       throw new DoNotRetryRegionException(UNEXPECTED_STATE_REGION + regionNode);
     }
@@ -766,10 +763,7 @@ public class AssignmentManager {
     RegionStateNode regionNode = regionStates.getOrCreateRegionStateNode(regionInfo);
     regionNode.lock();
     try {
-      if (regionNode.isSplit()) {
-        throw new DoNotRetryRegionException(regionNode.getRegionInfo().getEncodedName()
-          + " is a split parent and cannot be assigned");
-      }
+      regionNode.checkNotRetired();
       if (override) {
         if (regionNode.getProcedure() != null) {
           regionNode.unsetProcedure(regionNode.getProcedure());
