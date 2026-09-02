@@ -19,6 +19,7 @@ package org.apache.hadoop.hbase.regionserver.wal;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
 import java.io.IOException;
@@ -384,6 +385,54 @@ public class TestFSHLog extends AbstractTestFSWAL {
       TEST_UTIL.waitFor(10000, log.walFile2Props::isEmpty);
       assertEquals("WAL Files not cleaned ", 0, log.walFile2Props.size());
       region.close();
+    }
+  }
+
+  /**
+   * HBASE-30341: an exception out of {@code getSyncFuture} used to leave the claimed ring buffer
+   * sequence unpublished, wedging the WAL. If it regresses, this test times out on the final sync.
+   */
+  @Test
+  public void testGetSyncFutureThrowDoesNotWedgeWAL() throws IOException {
+    class DodgyFSHLog extends FSHLog {
+      volatile boolean throwException = false;
+
+      DodgyFSHLog(FileSystem fs, Path rootDir, String logDir, Configuration conf)
+        throws IOException {
+        super(fs, rootDir, logDir, conf);
+      }
+
+      @Override
+      protected SyncFuture getSyncFuture(long sequence, boolean forceSync) {
+        if (throwException) {
+          throw new RuntimeException("FAKE! getSyncFuture blew up");
+        }
+        return super.getSyncFuture(sequence, forceSync);
+      }
+    }
+
+    TableDescriptor td = TableDescriptorBuilder.newBuilder(TableName.valueOf(name.getMethodName()))
+      .setColumnFamily(ColumnFamilyDescriptorBuilder.of("row")).build();
+    RegionInfo ri = RegionInfoBuilder.newBuilder(td.getTableName()).build();
+    MultiVersionConcurrencyControl mvcc = new MultiVersionConcurrencyControl();
+    NavigableMap<byte[], Integer> scopes = new TreeMap<>(Bytes.BYTES_COMPARATOR);
+    for (byte[] fam : td.getColumnFamilyNames()) {
+      scopes.put(fam, 0);
+    }
+
+    DodgyFSHLog wal = new DodgyFSHLog(FS, CommonFSUtils.getWALRootDir(CONF), DIR.toString(), CONF);
+    wal.init();
+    try {
+      addEdits(wal, ri, td, 1, mvcc, scopes, "row");
+
+      wal.throwException = true;
+      assertThrows(Exception.class, () -> addEdits(wal, ri, td, 1, mvcc, scopes, "row"));
+
+      // WAL must still be usable; pre-fix this hangs forever on the leaked sequence.
+      wal.throwException = false;
+      addEdits(wal, ri, td, 1, mvcc, scopes, "row");
+    } finally {
+      wal.close();
     }
   }
 }

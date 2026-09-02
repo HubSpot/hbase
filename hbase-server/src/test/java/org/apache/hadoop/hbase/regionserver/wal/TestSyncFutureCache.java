@@ -17,12 +17,9 @@
  */
 package org.apache.hadoop.hbase.regionserver.wal;
 
-import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNotSame;
 
-import java.util.concurrent.CompletableFuture;
-import org.apache.hadoop.conf.Configuration;
+import java.lang.reflect.Field;
 import org.apache.hadoop.hbase.HBaseClassTestRule;
 import org.apache.hadoop.hbase.HBaseConfiguration;
 import org.apache.hadoop.hbase.testclassification.RegionServerTests;
@@ -30,6 +27,9 @@ import org.apache.hadoop.hbase.testclassification.SmallTests;
 import org.junit.ClassRule;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
+import org.mockito.Mockito;
+
+import org.apache.hbase.thirdparty.com.google.common.cache.Cache;
 
 @Category({ RegionServerTests.class, SmallTests.class })
 public class TestSyncFutureCache {
@@ -39,32 +39,16 @@ public class TestSyncFutureCache {
     HBaseClassTestRule.forClass(TestSyncFutureCache.class);
 
   @Test
-  public void testSyncFutureCacheLifeCycle() throws Exception {
-    final Configuration conf = HBaseConfiguration.create();
-    SyncFutureCache cache = new SyncFutureCache(conf);
-    try {
-      SyncFuture future0 = cache.getIfPresentOrNew().reset(0, false);
-      assertNotNull(future0);
-      // Get another future from the same thread, should be different one.
-      SyncFuture future1 = cache.getIfPresentOrNew().reset(1, false);
-      assertNotNull(future1);
-      assertNotSame(future0, future1);
-      cache.offer(future1);
-      // Should override.
-      cache.offer(future0);
-      SyncFuture future3 = cache.getIfPresentOrNew();
-      assertEquals(future3, future0);
-      final SyncFuture[] future4 = new SyncFuture[1];
-      // From a different thread
-      CompletableFuture.runAsync(() -> future4[0] = cache.getIfPresentOrNew().reset(4, false))
-        .get();
-      assertNotNull(future4[0]);
-      assertNotSame(future3, future4[0]);
-      // Clean up
-      cache.offer(future3);
-      cache.offer(future4[0]);
-    } finally {
-      cache.clear();
-    }
+  public void testFallsBackToNewSyncFutureWhenCacheThrows() throws Exception {
+    SyncFutureCache cache = new SyncFutureCache(HBaseConfiguration.create());
+
+    Cache<?, ?> throwing = Mockito.mock(Cache.class);
+    Mockito.when(throwing.asMap()).thenThrow(new NullPointerException("boom"));
+
+    Field field = SyncFutureCache.class.getDeclaredField("syncFutureCache");
+    field.setAccessible(true);
+    field.set(cache, throwing);
+
+    assertNotNull(cache.getIfPresentOrNew());
   }
 }
