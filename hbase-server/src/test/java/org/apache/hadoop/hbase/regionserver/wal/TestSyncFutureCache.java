@@ -20,6 +20,7 @@ package org.apache.hadoop.hbase.regionserver.wal;
 import static org.junit.Assert.assertNotNull;
 
 import java.lang.reflect.Field;
+import java.util.concurrent.ConcurrentMap;
 import org.apache.hadoop.hbase.HBaseClassTestRule;
 import org.apache.hadoop.hbase.HBaseConfiguration;
 import org.apache.hadoop.hbase.testclassification.RegionServerTests;
@@ -27,9 +28,10 @@ import org.apache.hadoop.hbase.testclassification.SmallTests;
 import org.junit.ClassRule;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
-import org.mockito.Mockito;
 
 import org.apache.hbase.thirdparty.com.google.common.cache.Cache;
+import org.apache.hbase.thirdparty.com.google.common.cache.CacheBuilder;
+import org.apache.hbase.thirdparty.com.google.common.cache.ForwardingCache;
 
 @Category({ RegionServerTests.class, SmallTests.class })
 public class TestSyncFutureCache {
@@ -42,8 +44,18 @@ public class TestSyncFutureCache {
   public void testFallsBackToNewSyncFutureWhenCacheThrows() throws Exception {
     SyncFutureCache cache = new SyncFutureCache(HBaseConfiguration.create());
 
-    Cache<?, ?> throwing = Mockito.mock(Cache.class);
-    Mockito.when(throwing.asMap()).thenThrow(new NullPointerException("boom"));
+    final Cache<Thread, SyncFuture> delegate = CacheBuilder.newBuilder().build();
+    Cache<Thread, SyncFuture> throwing = new ForwardingCache<Thread, SyncFuture>() {
+      @Override
+      protected Cache<Thread, SyncFuture> delegate() {
+        return delegate;
+      }
+
+      @Override
+      public ConcurrentMap<Thread, SyncFuture> asMap() {
+        throw new NullPointerException("boom");
+      }
+    };
 
     Field field = SyncFutureCache.class.getDeclaredField("syncFutureCache");
     field.setAccessible(true);
