@@ -128,8 +128,7 @@ public class BackupLogCleaner extends BaseLogCleanerDelegate {
       for (TableName table : backupInfo.getTableSetTimestampMap().keySet()) {
         for (Map.Entry<String, Long> entry : backupInfo.getTableSetTimestampMap().get(table)
           .entrySet()) {
-          builder.addBackupTimestamps(backupInfo.getBackupId(), entry.getKey(), entry.getValue(),
-            startCode);
+          builder.addBackupTimestamps(entry.getKey(), entry.getValue(), startCode);
         }
       }
     }
@@ -137,15 +136,10 @@ public class BackupLogCleaner extends BaseLogCleanerDelegate {
     BackupBoundaries boundaries = builder.build();
 
     if (LOG.isDebugEnabled()) {
-      for (Map.Entry<String, BackupBoundaries.BoundaryInfo> entry : boundaries.getBoundaries()
-        .entrySet()) {
-        String backupId = entry.getKey();
-        LOG.debug("Backup: {}, Boundaries oldestStartCode: {}", backupId,
-          entry.getValue().getOldestStartCode());
-        for (Map.Entry<Address, Long> addressAndTs : entry.getValue().getBoundaries().entrySet()) {
-          LOG.debug("Backup: {}, Server: {}, WAL cleanup boundary: {}", backupId,
-            addressAndTs.getKey().getHostName(), addressAndTs.getValue());
-        }
+      LOG.debug("Boundaries oldestStartCode: {}", boundaries.getOldestStartCode());
+      for (Map.Entry<Address, Long> entry : boundaries.getBoundaries().entrySet()) {
+        LOG.debug("Server: {}, WAL cleanup boundary: {}", entry.getKey().getHostName(),
+          entry.getValue());
       }
     }
 
