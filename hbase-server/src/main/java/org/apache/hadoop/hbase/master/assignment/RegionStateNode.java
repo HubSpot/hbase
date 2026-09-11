@@ -327,6 +327,25 @@ public class RegionStateNode implements Comparable<RegionStateNode> {
     }
   }
 
+  /**
+   * Throws {@link DoNotRetryRegionException} if this region is a split parent (i.e.
+   * {@link #isSplit()} returns true). Used by the assign path to prevent a split parent from being
+   * re-opened after master failover, where {@code loadMeta} reconstructs the node with
+   * {@code state=CLOSED} because {@code info:state} is never written to SPLIT (HBASE-30353).
+   */
+  public void checkNotRetired() throws DoNotRetryRegionException {
+    if (isSplit()) {
+      throw new DoNotRetryRegionException(
+        getRegionInfo().getEncodedName() + " is a split parent and cannot be assigned");
+    }
+  }
+
+  // The below 3 methods are for normal locking operation, where the thread owner is the current
+  // thread. Typically you just need to use these 3 methods, and use try..finally to release the
+  // lock in the finally block
+  /**
+   * @see RegionStateNodeLock#lock()
+   */
   public void lock() {
     lock.lock();
   }

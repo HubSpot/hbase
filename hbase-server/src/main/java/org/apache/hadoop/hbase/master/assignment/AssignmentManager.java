@@ -744,6 +744,9 @@ public class AssignmentManager {
     if (!regionNode.isInState(expectedStates)) {
       throw new DoNotRetryRegionException(UNEXPECTED_STATE_REGION + regionNode);
     }
+    // HBASE-30353: a split parent reads back as CLOSED after failover (info:state is never
+    // written to SPLIT). Reject it here so it can never be re-opened via the assign path.
+    regionNode.checkNotRetired();
     if (isTableDisabled(regionNode.getTable())) {
       throw new DoNotRetryIOException(regionNode.getTable() + " is disabled for " + regionNode);
     }
