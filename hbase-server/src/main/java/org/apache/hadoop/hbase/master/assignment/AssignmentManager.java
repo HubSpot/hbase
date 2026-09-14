@@ -765,6 +765,9 @@ public class AssignmentManager {
     RegionStateNode regionNode = regionStates.getOrCreateRegionStateNode(regionInfo);
     regionNode.lock();
     try {
+      // HBASE-30353: guard applies unconditionally — override=true (e.g. HBCK2) also skips
+      // preTransitCheck, so split parents must be rejected here before reaching that path.
+      regionNode.checkNotRetired();
       if (override) {
         if (regionNode.getProcedure() != null) {
           regionNode.unsetProcedure(regionNode.getProcedure());
