@@ -59,9 +59,9 @@ import org.slf4j.LoggerFactory;
  * RegionStateNode with {@code state=CLOSED}, so {@code preTransitCheck} (which only checks state,
  * not {@code regionInfo.isSplit()}) accepts the parent for assignment.
  * <p>
- * Fix: {@code RegionStateNode.checkNotRetired()} throws {@link DoNotRetryRegionException} when
- * {@code isSplit()} is true, and {@code preTransitCheck} calls it before allowing any external
- * assign to proceed.
+ * Fix: {@code AssignmentManager} checks {@code regionNode.isSplit()} in both {@code preTransitCheck}
+ * and {@code createAssignProcedure}, throwing {@link DoNotRetryRegionException} before any
+ * assign can proceed.
  */
 @Category({ MasterTests.class, MediumTests.class })
 public class TestSplitParentAssignment {
@@ -162,7 +162,7 @@ public class TestSplitParentAssignment {
       RegionState.State.CLOSED, freshRsn.getState());
 
     // Without the fix: preTransitCheck sees CLOSED ∈ {CLOSED, OFFLINE} and passes — bug.
-    // With the fix: checkNotRetired() throws DoNotRetryRegionException before any procedure runs.
+    // With the fix: isSplit() check throws DoNotRetryRegionException before any procedure runs.
     try {
       am.assign(splitParentInfo);
       fail("Expected DoNotRetryRegionException: split parent must not be assignable");

@@ -746,7 +746,10 @@ public class AssignmentManager {
     }
     // HBASE-30353: a split parent reads back as CLOSED after failover (info:state is never
     // written to SPLIT). Reject it here so it can never be re-opened via the assign path.
-    regionNode.checkNotRetired();
+    if (regionNode.isSplit()) {
+      throw new DoNotRetryRegionException(
+        regionNode.getRegionInfo().getEncodedName() + " is a split parent and cannot be assigned");
+    }
     if (isTableDisabled(regionNode.getTable())) {
       throw new DoNotRetryIOException(regionNode.getTable() + " is disabled for " + regionNode);
     }
@@ -767,7 +770,10 @@ public class AssignmentManager {
     try {
       // HBASE-30353: guard applies unconditionally — override=true (e.g. HBCK2) also skips
       // preTransitCheck, so split parents must be rejected here before reaching that path.
-      regionNode.checkNotRetired();
+      if (regionNode.isSplit()) {
+        throw new DoNotRetryRegionException(regionNode.getRegionInfo().getEncodedName()
+          + " is a split parent and cannot be assigned");
+      }
       if (override) {
         if (regionNode.getProcedure() != null) {
           regionNode.unsetProcedure(regionNode.getProcedure());
