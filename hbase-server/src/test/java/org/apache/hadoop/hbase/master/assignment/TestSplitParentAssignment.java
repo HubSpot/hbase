@@ -59,9 +59,9 @@ import org.slf4j.LoggerFactory;
  * RegionStateNode with {@code state=CLOSED}, so {@code preTransitCheck} (which only checks state,
  * not {@code regionInfo.isSplit()}) accepts the parent for assignment.
  * <p>
- * Fix: {@code AssignmentManager} checks {@code regionNode.isSplit()} in both {@code preTransitCheck}
- * and {@code createAssignProcedure}, throwing {@link DoNotRetryRegionException} before any
- * assign can proceed.
+ * Fix: {@code AssignmentManager} checks {@code regionNode.isSplit()} in both
+ * {@code preTransitCheck} and {@code createAssignProcedure}, throwing
+ * {@link DoNotRetryRegionException} before any assign can proceed.
  */
 @Category({ MasterTests.class, MediumTests.class })
 public class TestSplitParentAssignment {
