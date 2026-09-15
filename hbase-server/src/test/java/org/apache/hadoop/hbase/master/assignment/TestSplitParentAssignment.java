@@ -23,7 +23,7 @@ import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 import org.apache.hadoop.hbase.HBaseClassTestRule;
-import org.apache.hadoop.hbase.HBaseTestingUtil;
+import org.apache.hadoop.hbase.HBaseTestingUtility;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.client.DoNotRetryRegionException;
 import org.apache.hadoop.hbase.client.RegionInfo;
@@ -72,7 +72,7 @@ public class TestSplitParentAssignment {
 
   private static final Logger LOG = LoggerFactory.getLogger(TestSplitParentAssignment.class);
 
-  private static final HBaseTestingUtil UTIL = new HBaseTestingUtil();
+  private static final HBaseTestingUtility UTIL = new HBaseTestingUtility();
   private static final String CF = "cf";
   private static final int ROW_COUNT = 60;
   private static final int START_ROW = 11;
