@@ -744,6 +744,12 @@ public class AssignmentManager {
     if (!regionNode.isInState(expectedStates)) {
       throw new DoNotRetryRegionException(UNEXPECTED_STATE_REGION + regionNode);
     }
+    // HBASE-30353: a split parent reads back as CLOSED after failover (info:state is never
+    // written to SPLIT). Reject it here so it can never be re-opened via the assign path.
+    if (regionNode.isSplit()) {
+      throw new DoNotRetryRegionException(
+        regionNode.getRegionInfo().getEncodedName() + " is a split parent and cannot be assigned");
+    }
     if (isTableDisabled(regionNode.getTable())) {
       throw new DoNotRetryIOException(regionNode.getTable() + " is disabled for " + regionNode);
     }
@@ -762,6 +768,12 @@ public class AssignmentManager {
     RegionStateNode regionNode = regionStates.getOrCreateRegionStateNode(regionInfo);
     regionNode.lock();
     try {
+      // HBASE-30353: guard applies unconditionally — override=true (e.g. HBCK2) also skips
+      // preTransitCheck, so split parents must be rejected here before reaching that path.
+      if (regionNode.isSplit()) {
+        throw new DoNotRetryRegionException(regionNode.getRegionInfo().getEncodedName()
+          + " is a split parent and cannot be assigned");
+      }
       if (override) {
         if (regionNode.getProcedure() != null) {
           regionNode.unsetProcedure(regionNode.getProcedure());
