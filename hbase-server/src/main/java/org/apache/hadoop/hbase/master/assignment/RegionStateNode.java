@@ -327,12 +327,6 @@ public class RegionStateNode implements Comparable<RegionStateNode> {
     }
   }
 
-  // The below 3 methods are for normal locking operation, where the thread owner is the current
-  // thread. Typically you just need to use these 3 methods, and use try..finally to release the
-  // lock in the finally block
-  /**
-   * @see RegionStateNodeLock#lock()
-   */
   public void lock() {
     lock.lock();
   }
