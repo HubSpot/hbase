@@ -150,9 +150,7 @@ public class BackupBoundaries {
       Long storedTs = boundaries.get(address);
 
       if (storedTs == null) {
-        return hostLogRollTs <= oldestStartCode
-          ? DeleteStatus.OK
-          : DeleteStatus.NOT_DELETABLE_START_CODE;
+        return DeleteStatus.OK;
       }
 
       return hostLogRollTs <= storedTs ? DeleteStatus.OK : DeleteStatus.NOT_DELETABLE_BOUNDARY;
