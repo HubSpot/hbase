@@ -24,10 +24,13 @@ import static org.junit.Assert.fail;
 
 import org.apache.hadoop.hbase.HBaseClassTestRule;
 import org.apache.hadoop.hbase.HBaseTestingUtility;
+import org.apache.hadoop.hbase.HConstants;
+import org.apache.hadoop.hbase.MetaTableAccessor;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.client.DoNotRetryRegionException;
 import org.apache.hadoop.hbase.client.RegionInfo;
 import org.apache.hadoop.hbase.client.RegionInfoBuilder;
+import org.apache.hadoop.hbase.client.Result;
 import org.apache.hadoop.hbase.client.TableDescriptor;
 import org.apache.hadoop.hbase.master.RegionState;
 import org.apache.hadoop.hbase.master.procedure.MasterProcedureEnv;
@@ -50,18 +53,15 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Regression test for HBASE-30353 / HBasePlanning #2627: a split parent region must never be re-opened
- * after master failover.
+ * Regression test for HBASE-30353 / HBasePlanning #2627: a split parent region must never be
+ * re-opened after master failover.
  * <p>
- * Root cause: {@code MetaTableAccessor.splitRegion} writes {@code split=true, offline=true} into
- * {@code info:regioninfo} but never writes SPLIT into {@code info:state} — that cell stays as
- * CLOSED from the pre-split unassign step. After failover, {@code loadMeta} reconstructs the
- * RegionStateNode with {@code state=CLOSED}, so {@code preTransitCheck} (which only checks state,
- * not {@code regionInfo.isSplit()}) accepts the parent for assignment.
- * <p>
- * Fix: {@code AssignmentManager} checks {@code regionNode.isSplit()} in both
- * {@code preTransitCheck} and {@code createAssignProcedure}, throwing
- * {@link DoNotRetryRegionException} before any assign can proceed.
+ * Fix has two parts: (1) {@code MetaTableAccessor.splitRegion} now writes {@code SPLIT} into
+ * {@code info:state} for the parent, so after failover {@code loadMeta} reconstructs the
+ * {@link RegionStateNode} with {@code state=SPLIT} rather than {@code CLOSED}. (2)
+ * {@code AssignmentManager} checks {@code regionNode.isSplit()} in both {@code preTransitCheck} and
+ * {@code createAssignProcedure}, throwing {@link DoNotRetryRegionException} before any assign can
+ * proceed regardless of the state stored in meta.
  */
 @Category({ MasterTests.class, MediumTests.class })
 public class TestSplitParentAssignment {
@@ -137,8 +137,8 @@ public class TestSplitParentAssignment {
     assertTrue("Precondition: regionInfo.isSplit() must be true on freshRsn",
       splitParentInfo.isSplit());
     assertTrue("Precondition: isSplit() must return true", freshRsn.isSplit());
-    assertEquals("Precondition: state must be CLOSED to reproduce the bug",
-      RegionState.State.CLOSED, freshRsn.getState());
+    assertEquals("Precondition: state must be SPLIT (written to meta since HBASE-30353)",
+      RegionState.State.SPLIT, freshRsn.getState());
 
     // Without the fix: preTransitCheck sees CLOSED ∈ {CLOSED, OFFLINE} and passes — bug.
     // With the fix: isSplit() check throws DoNotRetryRegionException before any procedure runs.
@@ -149,6 +149,25 @@ public class TestSplitParentAssignment {
       assertTrue("Exception message must identify the region",
         expected.getMessage().contains(splitParentInfo.getEncodedName()));
     }
+  }
+
+  /**
+   * Verifies that {@code MetaTableAccessor.splitRegion} writes {@code SPLIT} into
+   * {@code info:state} for the parent, so that after a master failover {@code loadMeta} can
+   * reconstruct the correct terminal state without relying solely on {@code regionInfo.isSplit()}.
+   */
+  @Test
+  public void testSplitRegionWritesSplitStateToMeta() throws Exception {
+    TableName tableName = TableName.valueOf(name.getMethodName());
+    RegionInfo parentInfo = splitTableAndGetParent(tableName);
+
+    Result metaRow = MetaTableAccessor.getRegionResult(UTIL.getConnection(), parentInfo);
+    byte[] stateBytes = metaRow.getValue(HConstants.CATALOG_FAMILY,
+      MetaTableAccessor.getRegionStateColumn(RegionInfo.DEFAULT_REPLICA_ID));
+    RegionState.State stateInMeta = RegionState.State.valueOf(Bytes.toString(stateBytes));
+
+    assertEquals("info:state for split parent must be SPLIT in hbase:meta", RegionState.State.SPLIT,
+      stateInMeta);
   }
 
   private RegionInfo splitTableAndGetParent(TableName tableName) throws Exception {
@@ -165,9 +184,9 @@ public class TestSplitParentAssignment {
 
   /**
    * Reproduces the post-failover state: {@code loadMeta} rebuilds the parent's
-   * {@link RegionStateNode} from meta with {@code regionInfo.isSplit()=true} but
-   * {@code state=CLOSED}, because {@code MetaTableAccessor.splitRegion} writes
-   * {@code split=true} into {@code info:regioninfo} but never updates {@code info:state}.
+   * {@link RegionStateNode} from meta with {@code regionInfo.isSplit()=true} and
+   * {@code state=SPLIT}, because {@code MetaTableAccessor.splitRegion} now writes SPLIT into
+   * {@code info:state} as part of the HBASE-30353 fix.
    */
   private RegionStateNode simulatePostFailover(AssignmentManager am, RegionInfo parentInfo) {
     am.getRegionStates().deleteRegion(parentInfo);
@@ -175,7 +194,7 @@ public class TestSplitParentAssignment {
       .setStartKey(parentInfo.getStartKey()).setEndKey(parentInfo.getEndKey())
       .setRegionId(parentInfo.getRegionId()).setSplit(true).setOffline(true).build();
     RegionStateNode freshRsn = am.getRegionStates().getOrCreateRegionStateNode(splitParentInfo);
-    freshRsn.setState(RegionState.State.CLOSED);
+    freshRsn.setState(RegionState.State.SPLIT);
     return freshRsn;
   }
 
