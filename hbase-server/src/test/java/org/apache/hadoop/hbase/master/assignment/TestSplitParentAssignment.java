@@ -50,7 +50,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Regression test for HBASE-30353 / HubSpot #2627: a split parent region must never be re-opened
+ * Regression test for HBASE-30353 / HBasePlanning #2627: a split parent region must never be re-opened
  * after master failover.
  * <p>
  * Root cause: {@code MetaTableAccessor.splitRegion} writes {@code split=true, offline=true} into
@@ -96,10 +96,10 @@ public class TestSplitParentAssignment {
 
   @Before
   public void setup() throws Exception {
-    // Prevent CatalogJanitor from GC-ing the split parent before the test can use it.
+    // Prevent CatalogJanitor from garbage collecting the split parent before the test can use it.
     UTIL.getHBaseCluster().getMaster().setCatalogJanitorEnabled(false);
-    // Prevent compaction: if daughters compact away reference files, the parent becomes
-    // GC-eligible even with CatalogJanitor disabled.
+    // Prevent compaction. If daughters compact away reference files, the parent becomes
+    // eligible for garbage collection even with CatalogJanitor disabled.
     for (int i = 0; i < UTIL.getHBaseCluster().getLiveRegionServerThreads().size(); i++) {
       UTIL.getHBaseCluster().getRegionServer(i).getCompactSplitThread().switchCompaction(false);
     }
@@ -128,35 +128,14 @@ public class TestSplitParentAssignment {
   @Test
   public void testAssignSplitParentIsRejected() throws Exception {
     TableName tableName = TableName.valueOf(name.getMethodName());
-    ProcedureExecutor<MasterProcedureEnv> procExec = getMasterProcedureExecutor();
-
-    RegionInfo[] regions = MasterProcedureTestingUtility.createTable(procExec, tableName, null, CF);
-    insertData(UTIL, tableName, ROW_COUNT, START_ROW, CF);
-
-    int splitRowNum = START_ROW + ROW_COUNT / 2;
-    byte[] splitKey = Bytes.toBytes("" + splitRowNum);
-
-    long procId = procExec.submitProcedure(
-      new SplitTableRegionProcedure(procExec.getEnvironment(), regions[0], splitKey));
-    ProcedureTestingUtility.waitProcedure(procExec, procId);
-    ProcedureTestingUtility.assertProcNotFailed(procExec, procId);
-
     AssignmentManager am = UTIL.getHBaseCluster().getMaster().getAssignmentManager();
-    RegionInfo parentInfo = regions[0];
 
-    // Simulate post-failover: loadMeta creates a fresh RegionStateNode from meta, where
-    // regionInfo.isSplit()=true and state=CLOSED. Reproduce by removing the existing node
-    // (which has state=SPLIT but regionInfo.isSplit()=false — markRegionAsSplit never updates
-    // the in-memory RegionInfo) and re-creating it from a split=true RegionInfo.
-    am.getRegionStates().deleteRegion(parentInfo);
-    RegionInfo splitParentInfo = RegionInfoBuilder.newBuilder(parentInfo.getTable())
-      .setStartKey(parentInfo.getStartKey()).setEndKey(parentInfo.getEndKey())
-      .setRegionId(parentInfo.getRegionId()).setSplit(true).setOffline(true).build();
-    RegionStateNode freshRsn = am.getRegionStates().getOrCreateRegionStateNode(splitParentInfo);
-    freshRsn.setState(RegionState.State.CLOSED);
+    RegionInfo parentInfo = splitTableAndGetParent(tableName);
+    RegionStateNode freshRsn = simulatePostFailover(am, parentInfo);
+    RegionInfo splitParentInfo = freshRsn.getRegionInfo();
 
     assertTrue("Precondition: regionInfo.isSplit() must be true on freshRsn",
-      freshRsn.getRegionInfo().isSplit());
+      splitParentInfo.isSplit());
     assertTrue("Precondition: isSplit() must return true", freshRsn.isSplit());
     assertEquals("Precondition: state must be CLOSED to reproduce the bug",
       RegionState.State.CLOSED, freshRsn.getState());
@@ -170,6 +149,34 @@ public class TestSplitParentAssignment {
       assertTrue("Exception message must identify the region",
         expected.getMessage().contains(splitParentInfo.getEncodedName()));
     }
+  }
+
+  private RegionInfo splitTableAndGetParent(TableName tableName) throws Exception {
+    ProcedureExecutor<MasterProcedureEnv> procExec = getMasterProcedureExecutor();
+    RegionInfo[] regions = MasterProcedureTestingUtility.createTable(procExec, tableName, null, CF);
+    insertData(UTIL, tableName, ROW_COUNT, START_ROW, CF);
+    byte[] splitKey = Bytes.toBytes("" + (START_ROW + ROW_COUNT / 2));
+    long procId = procExec.submitProcedure(
+      new SplitTableRegionProcedure(procExec.getEnvironment(), regions[0], splitKey));
+    ProcedureTestingUtility.waitProcedure(procExec, procId);
+    ProcedureTestingUtility.assertProcNotFailed(procExec, procId);
+    return regions[0];
+  }
+
+  /**
+   * Reproduces the post-failover state: {@code loadMeta} rebuilds the parent's
+   * {@link RegionStateNode} from meta with {@code regionInfo.isSplit()=true} but
+   * {@code state=CLOSED}, because {@code MetaTableAccessor.splitRegion} writes
+   * {@code split=true} into {@code info:regioninfo} but never updates {@code info:state}.
+   */
+  private RegionStateNode simulatePostFailover(AssignmentManager am, RegionInfo parentInfo) {
+    am.getRegionStates().deleteRegion(parentInfo);
+    RegionInfo splitParentInfo = RegionInfoBuilder.newBuilder(parentInfo.getTable())
+      .setStartKey(parentInfo.getStartKey()).setEndKey(parentInfo.getEndKey())
+      .setRegionId(parentInfo.getRegionId()).setSplit(true).setOffline(true).build();
+    RegionStateNode freshRsn = am.getRegionStates().getOrCreateRegionStateNode(splitParentInfo);
+    freshRsn.setState(RegionState.State.CLOSED);
+    return freshRsn;
   }
 
   private ProcedureExecutor<MasterProcedureEnv> getMasterProcedureExecutor() {
