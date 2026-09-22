@@ -115,15 +115,8 @@ public class TestSplitParentAssignment {
 
   /**
    * Reproduces HBASE-30353: simulates the post-failover state where a new master reads the split
-   * parent from meta ({@code regionInfo.isSplit()=true}, {@code state=CLOSED}), then asserts that
+   * parent from meta ({@code regionInfo.isSplit()=true}, {@code state=SPLIT}), then asserts that
    * {@code assign()} rejects the parent.
-   * <p>
-   * After a split, {@code markRegionAsSplit} intentionally does NOT update the in-memory
-   * {@code RegionStateNode.regionInfo} — only meta gets {@code split=true}. After failover,
-   * {@code loadMeta} creates a FRESH {@code RegionStateNode} from the meta row, where
-   * {@code regionInfo.isSplit()=true} but {@code state=CLOSED} (because {@code info:state} is never
-   * written to SPLIT). This test reconstructs that exact in-memory state by removing the existing
-   * node and inserting a fresh one built from a {@code split=true} {@link RegionInfo}.
    */
   @Test
   public void testAssignSplitParentIsRejected() throws Exception {
@@ -140,8 +133,6 @@ public class TestSplitParentAssignment {
     assertEquals("Precondition: state must be SPLIT (written to meta since HBASE-30353)",
       RegionState.State.SPLIT, freshRsn.getState());
 
-    // Without the fix: preTransitCheck sees CLOSED ∈ {CLOSED, OFFLINE} and passes — bug.
-    // With the fix: isSplit() check throws DoNotRetryRegionException before any procedure runs.
     try {
       am.assign(splitParentInfo);
       fail("Expected DoNotRetryRegionException: split parent must not be assignable");
