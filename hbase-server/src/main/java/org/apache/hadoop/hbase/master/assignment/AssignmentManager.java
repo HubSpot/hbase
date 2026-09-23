@@ -744,6 +744,18 @@ public class AssignmentManager {
     if (!regionNode.isInState(expectedStates)) {
       throw new DoNotRetryRegionException(UNEXPECTED_STATE_REGION + regionNode);
     }
+
+    // if we don't write the state as SPLIT to the meta, we would need this check.
+
+    // if we want to write the state as SPLIT to the meta, tbd if we would need this.
+    // we would want this to be safe as we roll out the change. there may be some regionservers that
+    // are split but don't have the SPLIT state persisted to the meta because they split before this
+    // change. the actual chances of that happening are low (but 0).
+    if (regionNode.isSplit()) {
+      throw new DoNotRetryRegionException(
+        regionNode.getRegionInfo().getEncodedName() + " is a split parent and cannot be assigned");
+    }
+
     if (isTableDisabled(regionNode.getTable())) {
       throw new DoNotRetryIOException(regionNode.getTable() + " is disabled for " + regionNode);
     }
@@ -762,6 +774,10 @@ public class AssignmentManager {
     RegionStateNode regionNode = regionStates.getOrCreateRegionStateNode(regionInfo);
     regionNode.lock();
     try {
+      if (regionNode.isSplit()) {
+        throw new DoNotRetryRegionException(regionNode.getRegionInfo().getEncodedName()
+          + " is a split parent and cannot be assigned");
+      }
       if (override) {
         if (regionNode.getProcedure() != null) {
           regionNode.unsetProcedure(regionNode.getProcedure());
