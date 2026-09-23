@@ -1621,9 +1621,6 @@ public class MetaTableAccessor {
       Put putParent = makePutFromRegionInfo(
         RegionInfoBuilder.newBuilder(parent).setOffline(true).setSplit(true).build(), time);
       addDaughtersToPut(putParent, splitA, splitB);
-      // Write SPLIT into info:state so that after a master failover, loadMeta reconstructs the
-      // parent's RegionStateNode with state=SPLIT rather than CLOSED. Without this,
-      // preTransitCheck sees CLOSED ∈ {CLOSED, OFFLINE} and may assign the retired parent.
       addRegionStateToPut(putParent, RegionInfo.DEFAULT_REPLICA_ID, RegionState.State.SPLIT);
 
       // Puts for daughters
