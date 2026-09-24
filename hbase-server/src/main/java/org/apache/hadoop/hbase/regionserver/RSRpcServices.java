@@ -364,7 +364,8 @@ public class RSRpcServices implements HBaseRPCErrorHandler, AdminService.Blockin
   // to keep compatible for old clients which may send next or close request to a region
   // scanner which has already been exhausted. The entries will be removed automatically
   // after scannerLeaseTimeoutPeriod.
-  private final Cache<String, Long> closedScanners;
+  // volatile because corruption recovery reassigns this reference; see closeScanner()
+  private volatile Cache<String, Long> closedScanners;
   /**
    * The lease timeout period for client scanners (milliseconds).
    */
@@ -1313,8 +1314,7 @@ public class RSRpcServices implements HBaseRPCErrorHandler, AdminService.Blockin
     rpcServer.setErrorHandler(this);
     rs.setName(name);
 
-    closedScanners = CacheBuilder.newBuilder()
-      .expireAfterAccess(scannerLeaseTimeoutPeriod, TimeUnit.MILLISECONDS).build();
+    closedScanners = buildClosedScannersCache();
   }
 
   protected RpcServerInterface createRpcServer(final Server server,
@@ -3174,7 +3174,7 @@ public class RSRpcServices implements HBaseRPCErrorHandler, AdminService.Blockin
     RegionScannerHolder rsh = this.scanners.get(scannerName);
     if (rsh == null) {
       // just ignore the next or close request if scanner does not exists.
-      Long lastCallSeq = closedScanners.getIfPresent(scannerName);
+      Long lastCallSeq = getClosedScannerSeq(scannerName);
       if (lastCallSeq != null) {
         // Check the sequence number to catch if the last call was incorrectly retried.
         // The only allowed scenario is when the scanner is exhausted and one more scan
@@ -3882,8 +3882,35 @@ public class RSRpcServices implements HBaseRPCErrorHandler, AdminService.Blockin
         region.getCoprocessorHost().postScannerClose(scanner);
       }
       if (!isError) {
-        closedScanners.put(scannerName, rsh.getNextCallSeq());
+        try {
+          closedScanners.put(scannerName, rsh.getNextCallSeq());
+        } catch (AssertionError e) {
+          // Guava's LocalCache accessQueue can become corrupted under very high concurrent
+          // scanner-close load (see HBasePlanning#2664). Once corrupted, every put() throws
+          // AssertionError permanently, propagating to clients as IOException. Reinitialize
+          // the cache so subsequent closes work normally; this one scanner ID is not tracked,
+          // so a retry from the client will get UnknownScannerException instead of
+          // SCANNER_ALREADY_CLOSED — the client handles both by reopening the scanner.
+          LOG.warn("closedScanners cache corrupted; reinitializing. Scanner {} will not be"
+            + " tracked for this close.", scannerName, e);
+          closedScanners = buildClosedScannersCache();
+        }
       }
+    }
+  }
+
+  private Cache<String, Long> buildClosedScannersCache() {
+    return CacheBuilder.newBuilder()
+      .expireAfterAccess(scannerLeaseTimeoutPeriod, TimeUnit.MILLISECONDS).build();
+  }
+
+  private Long getClosedScannerSeq(String scannerName) {
+    try {
+      return closedScanners.getIfPresent(scannerName);
+    } catch (AssertionError e) {
+      LOG.warn("closedScanners cache corrupted on read; reinitializing.", e);
+      closedScanners = buildClosedScannersCache();
+      return null;
     }
   }
 
