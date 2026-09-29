@@ -18,36 +18,25 @@
 package org.apache.hadoop.hbase.mapreduce;
 
 import java.io.IOException;
-import java.util.Comparator;
-import java.util.PriorityQueue;
 import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.CellUtil;
 import org.apache.hadoop.hbase.io.ImmutableBytesWritable;
-import org.apache.hadoop.hbase.util.OrderPreservedMapReduceExtendedCell;
+import org.apache.hadoop.hbase.util.MapReduceExtendedCell;
 import org.apache.hadoop.mapreduce.Reducer;
 import org.apache.yetus.audience.InterfaceAudience;
 
 @InterfaceAudience.Private
-public class PreSortedCellsReducer extends Reducer<KeyOnlyCellComparable,
-  OrderPreservedMapReduceExtendedCell, ImmutableBytesWritable, Cell> {
+public class PreSortedCellsReducer
+  extends Reducer<KeyOnlyCellComparable, Cell, ImmutableBytesWritable, Cell> {
 
   @Override
-  protected void reduce(KeyOnlyCellComparable key,
-    Iterable<OrderPreservedMapReduceExtendedCell> values, Context context)
+  protected void reduce(KeyOnlyCellComparable key, Iterable<Cell> values, Context context)
     throws IOException, InterruptedException {
 
-    PriorityQueue<OrderPreservedMapReduceExtendedCell> cells = new PriorityQueue<>(
-      Comparator.comparingInt(OrderPreservedMapReduceExtendedCell::getOrder).reversed());
-
-    for (OrderPreservedMapReduceExtendedCell cell : values) {
-      OrderPreservedMapReduceExtendedCell copy =
-        new OrderPreservedMapReduceExtendedCell(cell.deepClone(), cell.getOrder());
-      cells.add(copy);
-    }
-
     int index = 0;
-    for (OrderPreservedMapReduceExtendedCell cell : cells) {
-      context.write(new ImmutableBytesWritable(CellUtil.cloneRow(key.getCell())), cell);
+    for (Cell cell : values) {
+      context.write(new ImmutableBytesWritable(CellUtil.cloneRow(key.getCell())),
+        new MapReduceExtendedCell(cell));
 
       if (++index % 100 == 0) {
         context.setStatus("Wrote " + index + " cells");
