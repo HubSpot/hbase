@@ -335,29 +335,47 @@ public class TestAssignmentManager extends TestAssignmentManagerBase {
     }
   }
 
+  @Test
+  public void testSplitParentCannotBeAssignedWhenStateIsSplit() throws Exception {
+    RegionInfo splitParent = RegionInfoBuilder.newBuilder(TableName.valueOf("test-table-split"))
+      .setSplit(true).setOffline(true).build();
+    RegionStateNode rsn = am.getRegionStates().getOrCreateRegionStateNode(splitParent);
+    rsn.setState(State.SPLIT);
+
+    try {
+      am.assign(splitParent);
+      fail("Expected DoNotRetryIOException for split parent assign");
+    } catch (DoNotRetryIOException e) {
+      assertTrue(e.getMessage(), e.getMessage().contains("split parent"));
+    }
+    assertNull(am.createOneAssignProcedure(splitParent, true));
+  }
+
   // Simulate the pre-fix failover scenario: regionInfo.isSplit()=true but state=OFFLINE because
   // the old code path did not write SPLIT to info:state, causing loadMeta to fall back to OFFLINE.
   // See HBASE-30353.
   @Test
   public void testSplitParentCannotBeAssignedWhenStateIsOfflineAfterFailover() throws Exception {
-    assertSplitParentAssignThrows("test-split-offline", State.OFFLINE);
+    RegionInfo splitParent = RegionInfoBuilder.newBuilder(TableName.valueOf("test-table-offline"))
+      .setSplit(true).setOffline(true).build();
+    RegionStateNode rsn = am.getRegionStates().getOrCreateRegionStateNode(splitParent);
+    rsn.setState(State.OFFLINE);
+
+    try {
+      am.assign(splitParent);
+      fail("Expected DoNotRetryIOException for split parent assign");
+    } catch (DoNotRetryIOException e) {
+      assertTrue(e.getMessage(), e.getMessage().contains("split parent"));
+    }
+    assertNull(am.createOneAssignProcedure(splitParent, true));
   }
 
   @Test
   public void testSplitParentCannotBeAssignedWhenStateIsClosedAfterFailover() throws Exception {
-    assertSplitParentAssignThrows("test-table", State.CLOSED);
-  }
-
-  @Test
-  public void testSplitParentCannotBeAssignedWhenStateIsSplit() throws Exception {
-    assertSplitParentAssignThrows("test-table-2", State.SPLIT);
-  }
-
-  private void assertSplitParentAssignThrows(String tableName, State state) throws Exception {
-    RegionInfo splitParent = RegionInfoBuilder.newBuilder(TableName.valueOf(tableName))
+    RegionInfo splitParent = RegionInfoBuilder.newBuilder(TableName.valueOf("test-table-closed"))
       .setSplit(true).setOffline(true).build();
     RegionStateNode rsn = am.getRegionStates().getOrCreateRegionStateNode(splitParent);
-    rsn.setState(state);
+    rsn.setState(State.CLOSED);
 
     try {
       am.assign(splitParent);
