@@ -21,7 +21,6 @@ import static org.apache.hadoop.hbase.regionserver.HStoreFile.BULKLOAD_TASK_KEY;
 import static org.apache.hadoop.hbase.regionserver.HStoreFile.BULKLOAD_TIME_KEY;
 import static org.apache.hadoop.hbase.regionserver.HStoreFile.EXCLUDE_FROM_MINOR_COMPACTION_KEY;
 import static org.apache.hadoop.hbase.regionserver.HStoreFile.MAJOR_COMPACTION_KEY;
-import static org.apache.hadoop.hbase.regionserver.HStoreFile.MAX_SEQ_ID_KEY;
 
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
@@ -210,13 +209,6 @@ public class HFileOutputFormat2 extends FileOutputFormat<ImmutableBytesWritable,
   public static final String REMOTE_CLUSTER_ZOOKEEPER_ZNODE_PARENT_CONF_KEY =
     REMOTE_CLUSTER_CONF_PREFIX + HConstants.ZOOKEEPER_ZNODE_PARENT;
 
-  /**
-   * Set the MAX_SEQ_ID metadata on the resulting HFile. This will ensure the HFiles will be sorted
-   * properly when read by tools such as the ClientSideRegionScanner. Will have no effect if the
-   * HFile is bulkloaded, as the sequence ID generated when bulkloading will override this metadata.
-   */
-  public static final String SET_MAX_SEQ_ID_KEY = "hbase.hfileoutputformat.set.max.seq.id";
-
   public static final String STORAGE_POLICY_PROPERTY = HStore.BLOCK_STORAGE_POLICY_KEY;
   public static final String STORAGE_POLICY_PROPERTY_CF_PREFIX = STORAGE_POLICY_PROPERTY + ".";
 
@@ -278,7 +270,7 @@ public class HFileOutputFormat2 extends FileOutputFormat<ImmutableBytesWritable,
 
     return new RecordWriter<ImmutableBytesWritable, V>() {
       // Map of families to writers and how much has been output on the writer.
-      private final Map<byte[], WriterInfo> writers = new TreeMap<>(Bytes.BYTES_COMPARATOR);
+      private final Map<byte[], WriterLength> writers = new TreeMap<>(Bytes.BYTES_COMPARATOR);
       private final Map<byte[], byte[]> previousRows = new TreeMap<>(Bytes.BYTES_COMPARATOR);
       private final long now = EnvironmentEdgeManager.currentTime();
       private byte[] tableNameBytes = writeMultipleTables ? null : Bytes.toBytes(writeTableNames);
@@ -308,10 +300,10 @@ public class HFileOutputFormat2 extends FileOutputFormat<ImmutableBytesWritable,
         }
         byte[] tableAndFamily = getTableNameSuffixedWithFamily(tableNameBytes, family);
 
-        WriterInfo wi = this.writers.get(tableAndFamily);
+        WriterLength wl = this.writers.get(tableAndFamily);
 
         // If this is a new column family, verify that the directory exists
-        if (wi == null) {
+        if (wl == null) {
           Path writerPath = null;
           if (writeMultipleTables) {
             Path tableRelPath = getTableRelativePath(tableNameBytes);
@@ -325,14 +317,14 @@ public class HFileOutputFormat2 extends FileOutputFormat<ImmutableBytesWritable,
 
         // This can only happen once a row is finished though
         if (
-          wi != null && wi.written + length >= maxsize
+          wl != null && wl.written + length >= maxsize
             && Bytes.compareTo(this.previousRows.get(family), rowKey) != 0
         ) {
-          rollWriters(wi);
+          rollWriters(wl);
         }
 
         // create a new WAL writer, if necessary
-        if (wi == null || wi.writer == null) {
+        if (wl == null || wl.writer == null) {
           InetSocketAddress[] favoredNodes = null;
           if (conf.getBoolean(LOCALITY_SENSITIVE_CONF_KEY, DEFAULT_LOCALITY_SENSITIVE)) {
             HRegionLocation loc = null;
@@ -363,15 +355,14 @@ public class HFileOutputFormat2 extends FileOutputFormat<ImmutableBytesWritable,
               }
             }
           }
-          wi = getNewWriter(tableNameBytes, family, conf, favoredNodes);
+          wl = getNewWriter(tableNameBytes, family, conf, favoredNodes);
 
         }
 
         // we now have the proper WAL writer. full steam ahead
         PrivateCellUtil.updateLatestStamp(cell, this.now);
-        wi.writer.append(kv);
-        wi.written += length;
-        wi.maxSequenceId = Math.max(kv.getSequenceId(), wi.maxSequenceId);
+        wl.writer.append(kv);
+        wl.written += length;
 
         // Copy the row so we know when a row transition.
         this.previousRows.put(family, rowKey);
@@ -387,25 +378,24 @@ public class HFileOutputFormat2 extends FileOutputFormat<ImmutableBytesWritable,
         return tableRelPath;
       }
 
-      private void rollWriters(WriterInfo writerInfo) throws IOException {
-        if (writerInfo != null) {
-          closeWriter(writerInfo);
+      private void rollWriters(WriterLength writerLength) throws IOException {
+        if (writerLength != null) {
+          closeWriter(writerLength);
         } else {
-          for (WriterInfo wi : this.writers.values()) {
-            closeWriter(wi);
+          for (WriterLength wl : this.writers.values()) {
+            closeWriter(wl);
           }
         }
       }
 
-      private void closeWriter(WriterInfo wi) throws IOException {
-        if (wi.writer != null) {
+      private void closeWriter(WriterLength wl) throws IOException {
+        if (wl.writer != null) {
           LOG.info(
-            "Writer=" + wi.writer.getPath() + ((wi.written == 0) ? "" : ", wrote=" + wi.written));
-          close(wi.writer, wi);
-          wi.writer = null;
+            "Writer=" + wl.writer.getPath() + ((wl.written == 0) ? "" : ", wrote=" + wl.written));
+          close(wl.writer);
+          wl.writer = null;
         }
-        wi.written = 0;
-        wi.maxSequenceId = -1;
+        wl.written = 0;
       }
 
       private Configuration createRemoteClusterConf(Configuration conf) {
@@ -445,11 +435,11 @@ public class HFileOutputFormat2 extends FileOutputFormat<ImmutableBytesWritable,
 
       /*
        * Create a new StoreFile.Writer.
-       * @return A WriterInfo, containing a new StoreFile.Writer.
+       * @return A WriterLength, containing a new StoreFile.Writer.
        */
       @edu.umd.cs.findbugs.annotations.SuppressWarnings(value = "BX_UNBOXING_IMMEDIATELY_REBOXED",
           justification = "Not important")
-      private WriterInfo getNewWriter(byte[] tableName, byte[] family, Configuration conf,
+      private WriterLength getNewWriter(byte[] tableName, byte[] family, Configuration conf,
         InetSocketAddress[] favoredNodes) throws IOException {
         byte[] tableAndFamily = getTableNameSuffixedWithFamily(tableName, family);
         Path familydir = new Path(outputDir, Bytes.toString(family));
@@ -457,7 +447,7 @@ public class HFileOutputFormat2 extends FileOutputFormat<ImmutableBytesWritable,
           familydir =
             new Path(outputDir, new Path(getTableRelativePath(tableName), Bytes.toString(family)));
         }
-        WriterInfo wi = new WriterInfo();
+        WriterLength wl = new WriterLength();
         Algorithm compression = overriddenCompression;
         compression = compression == null ? compressionMap.get(tableAndFamily) : compression;
         compression = compression == null ? defaultCompression : compression;
@@ -484,26 +474,23 @@ public class HFileOutputFormat2 extends FileOutputFormat<ImmutableBytesWritable,
 
         HFileContext hFileContext = contextBuilder.build();
         if (null == favoredNodes) {
-          wi.writer =
+          wl.writer =
             new StoreFileWriter.Builder(conf, CacheConfig.DISABLED, fs).withOutputDir(familydir)
               .withBloomType(bloomType).withFileContext(hFileContext).build();
         } else {
-          wi.writer = new StoreFileWriter.Builder(conf, CacheConfig.DISABLED, new HFileSystem(fs))
+          wl.writer = new StoreFileWriter.Builder(conf, CacheConfig.DISABLED, new HFileSystem(fs))
             .withOutputDir(familydir).withBloomType(bloomType).withFileContext(hFileContext)
             .withFavoredNodes(favoredNodes).build();
         }
 
-        this.writers.put(tableAndFamily, wi);
-        return wi;
+        this.writers.put(tableAndFamily, wl);
+        return wl;
       }
 
-      private void close(final StoreFileWriter w, final WriterInfo wl) throws IOException {
+      private void close(final StoreFileWriter w) throws IOException {
         if (w != null) {
           w.appendFileInfo(BULKLOAD_TIME_KEY, Bytes.toBytes(EnvironmentEdgeManager.currentTime()));
           w.appendFileInfo(BULKLOAD_TASK_KEY, Bytes.toBytes(context.getTaskAttemptID().toString()));
-          if (conf.getBoolean(SET_MAX_SEQ_ID_KEY, false) && wl.maxSequenceId >= 0) {
-            w.appendFileInfo(MAX_SEQ_ID_KEY, Bytes.toBytes(wl.maxSequenceId));
-          }
           w.appendFileInfo(MAJOR_COMPACTION_KEY, Bytes.toBytes(true));
           w.appendFileInfo(EXCLUDE_FROM_MINOR_COMPACTION_KEY, Bytes.toBytes(compactionExclude));
           w.appendTrackedTimestampsToMetadata();
@@ -513,8 +500,8 @@ public class HFileOutputFormat2 extends FileOutputFormat<ImmutableBytesWritable,
 
       @Override
       public void close(TaskAttemptContext c) throws IOException, InterruptedException {
-        for (WriterInfo wi : this.writers.values()) {
-          close(wi.writer, wi);
+        for (WriterLength wl : this.writers.values()) {
+          close(wl.writer);
         }
       }
     };
@@ -537,9 +524,8 @@ public class HFileOutputFormat2 extends FileOutputFormat<ImmutableBytesWritable,
   /*
    * Data structure to hold a Writer and amount of data written on it.
    */
-  static class WriterInfo {
+  static class WriterLength {
     long written = 0;
-    long maxSequenceId = -1;
     StoreFileWriter writer = null;
   }
 
