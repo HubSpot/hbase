@@ -21,10 +21,12 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 import java.util.Collections;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import org.apache.hadoop.hbase.DoNotRetryIOException;
 import org.apache.hadoop.hbase.HBaseClassTestRule;
 import org.apache.hadoop.hbase.HBaseTestingUtility;
 import org.apache.hadoop.hbase.MetaTableAccessor;
@@ -331,5 +333,56 @@ public class TestAssignmentManager extends TestAssignmentManagerBase {
     } finally {
       this.util.killMiniHBaseCluster();
     }
+  }
+
+  @Test
+  public void testSplitParentCannotBeAssignedWhenStateIsSplit() throws Exception {
+    RegionInfo splitParent = RegionInfoBuilder.newBuilder(TableName.valueOf("test-table-split"))
+      .setSplit(true).setOffline(true).build();
+    RegionStateNode rsn = am.getRegionStates().getOrCreateRegionStateNode(splitParent);
+    rsn.setState(State.SPLIT);
+
+    try {
+      am.assign(splitParent);
+      fail("Expected DoNotRetryIOException for split parent assign");
+    } catch (DoNotRetryIOException e) {
+      assertTrue(e.getMessage(), e.getMessage().contains("split parent"));
+    }
+    assertNull(am.createOneAssignProcedure(splitParent, true));
+  }
+
+  // Simulate the pre-fix failover scenario: regionInfo.isSplit()=true but state=OFFLINE because
+  // the old code path did not write SPLIT to info:state, causing loadMeta to fall back to OFFLINE.
+  // See HBASE-30353.
+  @Test
+  public void testSplitParentCannotBeAssignedWhenStateIsOfflineAfterFailover() throws Exception {
+    RegionInfo splitParent = RegionInfoBuilder.newBuilder(TableName.valueOf("test-table-offline"))
+      .setSplit(true).setOffline(true).build();
+    RegionStateNode rsn = am.getRegionStates().getOrCreateRegionStateNode(splitParent);
+    rsn.setState(State.OFFLINE);
+
+    try {
+      am.assign(splitParent);
+      fail("Expected DoNotRetryIOException for split parent assign");
+    } catch (DoNotRetryIOException e) {
+      assertTrue(e.getMessage(), e.getMessage().contains("split parent"));
+    }
+    assertNull(am.createOneAssignProcedure(splitParent, true));
+  }
+
+  @Test
+  public void testSplitParentCannotBeAssignedWhenStateIsClosedAfterFailover() throws Exception {
+    RegionInfo splitParent = RegionInfoBuilder.newBuilder(TableName.valueOf("test-table-closed"))
+      .setSplit(true).setOffline(true).build();
+    RegionStateNode rsn = am.getRegionStates().getOrCreateRegionStateNode(splitParent);
+    rsn.setState(State.CLOSED);
+
+    try {
+      am.assign(splitParent);
+      fail("Expected DoNotRetryIOException for split parent assign");
+    } catch (DoNotRetryIOException e) {
+      assertTrue(e.getMessage(), e.getMessage().contains("split parent"));
+    }
+    assertNull(am.createOneAssignProcedure(splitParent, true));
   }
 }
