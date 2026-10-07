@@ -30,6 +30,8 @@ import java.io.DataInputStream;
 import java.io.DataOutput;
 import java.io.DataOutputStream;
 import java.io.IOException;
+import java.net.InetAddress;
+import java.net.UnknownHostException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
@@ -1385,6 +1387,18 @@ public class HFileBlock implements Cacheable {
 
     private final long readWarnTime;
 
+    private static final String LOCAL_HOSTNAME;
+
+    static {
+      String h;
+      try {
+        h = InetAddress.getLocalHost().getHostName();
+      } catch (UnknownHostException e) {
+        h = "unknown";
+      }
+      LOCAL_HOSTNAME = h;
+    }
+
     /**
      * If reading block cost time in milliseconds more than the threshold, a warning will be logged.
      */
@@ -1521,6 +1535,30 @@ public class HFileBlock implements Cacheable {
      * @see FSReader#readBlockData(long, long, boolean, boolean, boolean) for more details about the
      *      useHeap.
      */
+    private void logChecksumReadMode(boolean usingHBaseChecksum, long offset) {
+      // noChecksumFs != hfs means HFileSystem created a separate FS instance with
+      // setVerifyChecksum(false) and dfs.client.read.shortcircuit.skip.checksum=true.
+      boolean noChecksumFsDistinct = hfs != null && hfs.getNoChecksumFs() != hfs;
+      boolean shortCircuitConfigured = noChecksumFsDistinct
+        && hfs.getNoChecksumFs().getConf().getBoolean("dfs.client.read.shortcircuit", false);
+      boolean shortCircuitSkipEnabled = noChecksumFsDistinct && hfs.getNoChecksumFs().getConf()
+        .getBoolean("dfs.client.read.shortcircuit.skip.checksum", false);
+
+      if (usingHBaseChecksum) {
+        LOG.warn(
+          "[CHECKSUM-DEBUG] HBase-checksum (DFS SKIPPED): file={} offset={} localHost={}"
+            + " noChecksumFsDistinct={} shortCircuitConfigured={} shortCircuitSkipEnabled={}",
+          pathName, offset, LOCAL_HOSTNAME, noChecksumFsDistinct, shortCircuitConfigured,
+          shortCircuitSkipEnabled);
+      } else {
+        LOG.warn(
+          "[CHECKSUM-DEBUG] DFS-checksum (DFS ACTIVE): file={} offset={} localHost={}"
+            + " noChecksumFsDistinct={} shortCircuitConfigured={} shortCircuitSkipEnabled={}",
+          pathName, offset, LOCAL_HOSTNAME, noChecksumFsDistinct, shortCircuitConfigured,
+          shortCircuitSkipEnabled);
+      }
+    }
+
     @Override
     public HFileBlock readBlockData(long offset, long onDiskSizeWithHeaderL, boolean pread,
       boolean updateMetrics, boolean intoHeap) throws IOException {
@@ -1531,6 +1569,7 @@ public class HFileBlock implements Cacheable {
       // guaranteed to use hdfs checksum verification.
       boolean doVerificationThruHBaseChecksum = streamWrapper.shouldUseHBaseChecksum();
       FSDataInputStream is = streamWrapper.getStream(doVerificationThruHBaseChecksum);
+      logChecksumReadMode(doVerificationThruHBaseChecksum, offset);
       final Context context = Context.current().with(CONTEXT_KEY,
         new HFileContextAttributesBuilderConsumer(fileContext)
           .setSkipChecksum(doVerificationThruHBaseChecksum)
