@@ -18,12 +18,12 @@
 package org.apache.hadoop.hbase.quotas;
 
 import static org.apache.hadoop.hbase.quotas.ThrottleQuotaTestUtil.triggerUserCacheRefresh;
-import static org.hamcrest.MatcherAssert.assertThat;
-import static org.hamcrest.Matchers.lessThan;
+import static org.junit.Assert.assertTrue;
 
 import java.io.IOException;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
+import org.apache.hadoop.hbase.HBaseClassTestRule;
 import org.apache.hadoop.hbase.HBaseTestingUtility;
 import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.TableName;
@@ -34,22 +34,24 @@ import org.apache.hadoop.hbase.testclassification.MediumTests;
 import org.apache.hadoop.hbase.testclassification.RegionServerTests;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.Tag;
-import org.junit.jupiter.api.Test;
+import org.junit.AfterClass;
+import org.junit.BeforeClass;
+import org.junit.ClassRule;
+import org.junit.Test;
+import org.junit.experimental.categories.Category;
 
-@Tag(RegionServerTests.TAG)
-@Tag(MediumTests.TAG)
+@Category({ RegionServerTests.class, MediumTests.class })
 public class TestThreadHandlerUsageQuota {
-
+  @ClassRule
+  public static final HBaseClassTestRule CLASS_RULE =
+    HBaseClassTestRule.forClass(TestThreadHandlerUsageQuota.class);
   private static final HBaseTestingUtility TEST_UTIL = new HBaseTestingUtility();
   private static final TableName TABLE_NAME = TableName.valueOf(UUID.randomUUID().toString());
   private static final byte[] FAMILY = Bytes.toBytes("cf");
   private static final byte[] QUALIFIER = Bytes.toBytes("q");
   private static final int MAX_OPS = 1000;
 
-  @AfterAll
+  @AfterClass
   public static void tearDown() throws Exception {
     ThrottleQuotaTestUtil.clearQuotaCache(TEST_UTIL);
     EnvironmentEdgeManager.reset();
@@ -57,7 +59,7 @@ public class TestThreadHandlerUsageQuota {
     TEST_UTIL.shutdownMiniCluster();
   }
 
-  @BeforeAll
+  @BeforeClass
   public static void setUpBeforeClass() throws Exception {
     // Enable quotas
     TEST_UTIL.getConfiguration().setBoolean(QuotaUtil.QUOTA_CONF_KEY, true);
@@ -82,8 +84,8 @@ public class TestThreadHandlerUsageQuota {
 
       configureThrottle();
       long throttledAttempts = ThrottleQuotaTestUtil.doGets(MAX_OPS, FAMILY, QUALIFIER, table);
-      assertThat("Throttled attempts should be less than unthrottled attempts", throttledAttempts,
-        lessThan(unthrottledAttempts));
+      assertTrue("Throttled attempts should be less than unthrottled attempts",
+        throttledAttempts < unthrottledAttempts);
     }
   }
 
@@ -95,8 +97,8 @@ public class TestThreadHandlerUsageQuota {
 
       configureThrottle();
       long throttledAttempts = ThrottleQuotaTestUtil.doPuts(MAX_OPS, FAMILY, QUALIFIER, table);
-      assertThat("Throttled attempts should be less than unthrottled attempts", throttledAttempts,
-        lessThan(unthrottledAttempts));
+      assertTrue("Throttled attempts should be less than unthrottled attempts",
+        throttledAttempts < unthrottledAttempts);
     }
   }
 
