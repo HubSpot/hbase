@@ -17,6 +17,8 @@
  */
 package org.apache.hadoop.hbase.quotas;
 
+import static org.apache.hadoop.hbase.quotas.ThrottleQuotaTestUtil.triggerUserCacheRefresh;
+
 import java.io.IOException;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
@@ -44,7 +46,6 @@ public class TestDefaultHandlerUsageQuota {
     HBaseClassTestRule.forClass(TestDefaultHandlerUsageQuota.class);
   private static final HBaseTestingUtility TEST_UTIL = new HBaseTestingUtility();
   private static final TableName TABLE_NAME = TableName.valueOf(UUID.randomUUID().toString());
-  private static final int REFRESH_TIME = 5;
   private static final byte[] FAMILY = Bytes.toBytes("cf");
   private static final byte[] QUALIFIER = Bytes.toBytes("q");
 
@@ -60,7 +61,6 @@ public class TestDefaultHandlerUsageQuota {
   public static void setUp() throws Exception {
     // quotas enabled, using block bytes scanned
     TEST_UTIL.getConfiguration().setBoolean(QuotaUtil.QUOTA_CONF_KEY, true);
-    TEST_UTIL.getConfiguration().setInt(QuotaCache.REFRESH_CONF_KEY, REFRESH_TIME);
     // Set default to very strict
     TEST_UTIL.getConfiguration()
       .setInt(QuotaUtil.QUOTA_DEFAULT_USER_MACHINE_REQUEST_HANDLER_USAGE_MS, 10);
@@ -73,6 +73,9 @@ public class TestDefaultHandlerUsageQuota {
     TEST_UTIL.createTable(TABLE_NAME, FAMILY);
     TEST_UTIL.waitTableAvailable(TABLE_NAME);
     TEST_UTIL.flush(TABLE_NAME);
+    // increase the tick so we can calculate a positive rpc request time, and then consume all the
+    // available quota and make request fail next time
+    ThrottleQuotaTestUtil.envEdge.setValue(System.currentTimeMillis() + 1000);
   }
 
   @Test
@@ -90,11 +93,13 @@ public class TestDefaultHandlerUsageQuota {
     TEST_UTIL.waitFor(60_000, () -> runPutTest(100) < 100);
   }
 
-  private void configureLenientThrottle() throws IOException {
+  private void configureLenientThrottle() throws Exception {
     try (Admin admin = TEST_UTIL.getAdmin()) {
       admin.setQuota(QuotaSettingsFactory.throttleUser(getUserName(),
-        ThrottleType.REQUEST_HANDLER_USAGE_MS, 100_000, TimeUnit.SECONDS));
+        ThrottleType.REQUEST_HANDLER_USAGE_MS, 100_000_000, TimeUnit.SECONDS));
     }
+    triggerUserCacheRefresh(TEST_UTIL, false, TABLE_NAME);
+    ThrottleQuotaTestUtil.envEdge.setValue(System.currentTimeMillis() + 1000);
   }
 
   private static String getUserName() throws IOException {
@@ -105,6 +110,8 @@ public class TestDefaultHandlerUsageQuota {
     try (Admin admin = TEST_UTIL.getAdmin()) {
       admin.setQuota(QuotaSettingsFactory.unthrottleUser(getUserName()));
     }
+    triggerUserCacheRefresh(TEST_UTIL, false, TABLE_NAME);
+    ThrottleQuotaTestUtil.envEdge.setValue(System.currentTimeMillis() + 1000);
   }
 
   private long runPutTest(int attempts) throws Exception {
