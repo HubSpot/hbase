@@ -47,6 +47,7 @@ import org.apache.hadoop.hbase.regionserver.handler.ParallelSeekHandler;
 import org.apache.hadoop.hbase.regionserver.querymatcher.CompactionScanQueryMatcher;
 import org.apache.hadoop.hbase.regionserver.querymatcher.ScanQueryMatcher;
 import org.apache.hadoop.hbase.regionserver.querymatcher.UserScanQueryMatcher;
+import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.util.EnvironmentEdgeManager;
 import org.apache.yetus.audience.InterfaceAudience;
 import org.slf4j.Logger;
@@ -144,6 +145,9 @@ public class StoreScanner extends NonReversedNonLazyKeyValueScanner
   public static final String STORESCANNER_PREAD_MAX_BYTES =
     ConfigKey.LONG("hbase.storescanner.pread.max.bytes");
 
+  // HubSpot only, do not upstream
+  public static final String HUBSPOT_SNAPSHOT_SCAN_NOW_ATTRIBUTE = "hubspot.snapshot.scan.now";
+
   private final Scan.ReadType readType;
 
   // A flag whether use pread for scan
@@ -175,7 +179,7 @@ public class StoreScanner extends NonReversedNonLazyKeyValueScanner
     get = scan.isGetScan();
     explicitColumnQuery = numColumns > 0;
     this.scan = scan;
-    this.now = EnvironmentEdgeManager.currentTime();
+    this.now = getNow(scan);
     this.oldestUnexpiredTS = scan.isRaw() ? 0L : now - scanInfo.getTtl();
     this.minVersions = scanInfo.getMinVersions();
 
@@ -224,6 +228,28 @@ public class StoreScanner extends NonReversedNonLazyKeyValueScanner
 
   private void addCurrentScanners(List<? extends KeyValueScanner> scanners) {
     this.currentScanners.addAll(scanners);
+  }
+
+  // HubSpot only change. Intended for snapshot scans only, useful for setting the scan time
+  // to the time the backup was taken, so TTLs are treated the same for every scan of the same
+  // backup set, and the data view remains consistent
+  private static long getNow(Scan scan) {
+    byte[] attribute = scan.getAttribute(HUBSPOT_SNAPSHOT_SCAN_NOW_ATTRIBUTE);
+    if (attribute == null) {
+      return EnvironmentEdgeManager.currentTime();
+    }
+
+    // If we accidentally set this in the RS, we want to return currentTime regardless
+    if (RpcServer.isInRpcCallContext()) {
+      return EnvironmentEdgeManager.currentTime();
+    }
+
+    try {
+      return Bytes.toLong(attribute);
+    } catch (Exception e) {
+      throw new RuntimeException(String.format("%s is invalid: %s",
+        HUBSPOT_SNAPSHOT_SCAN_NOW_ATTRIBUTE, Bytes.toString(attribute)), e);
+    }
   }
 
   private static boolean isOnlyLatestVersionScan(Scan scan) {
