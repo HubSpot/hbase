@@ -35,6 +35,7 @@ import java.util.NavigableSet;
 import java.util.TreeSet;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.hbase.ArrayBackedTag;
 import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.CellComparator;
 import org.apache.hadoop.hbase.CellUtil;
@@ -46,12 +47,16 @@ import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.KeepDeletedCells;
 import org.apache.hadoop.hbase.KeyValue;
 import org.apache.hadoop.hbase.PrivateCellUtil;
+import org.apache.hadoop.hbase.Tag;
+import org.apache.hadoop.hbase.TagType;
 import org.apache.hadoop.hbase.client.Get;
 import org.apache.hadoop.hbase.client.Scan;
 import org.apache.hadoop.hbase.filter.BinaryComparator;
 import org.apache.hadoop.hbase.filter.ColumnCountGetFilter;
 import org.apache.hadoop.hbase.filter.Filter;
 import org.apache.hadoop.hbase.filter.QualifierFilter;
+import org.apache.hadoop.hbase.ipc.RpcCall;
+import org.apache.hadoop.hbase.ipc.RpcServer;
 import org.apache.hadoop.hbase.testclassification.RegionServerTests;
 import org.apache.hadoop.hbase.testclassification.SmallTests;
 import org.apache.hadoop.hbase.util.Bytes;
@@ -65,6 +70,7 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
 import org.junit.rules.TestName;
+import org.mockito.Mockito;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -835,6 +841,68 @@ public class TestStoreScanner {
 
       assertEquals(false, scanner.next(results));
     }
+  }
+
+  @Test
+  public void testScanNowAttributeAppliesToFamilyTtl() throws IOException {
+    KeyValue older = create("R1", "cf", "a", 1000, KeyValue.Type.Put, "dont-care");
+    KeyValue newer = create("R1", "cf", "b", 2000, KeyValue.Type.Put, "dont-care");
+    ScanInfo scanInfo = new ScanInfo(CONF, CF, 0, 1, 500, KeepDeletedCells.FALSE,
+      HConstants.DEFAULT_BLOCKSIZE, 0, CellComparator.getInstance(), false);
+
+    assertEquals(Arrays.asList(older, newer), scanAt(1200, scanInfo, older, newer));
+    assertEquals(Collections.singletonList(newer), scanAt(2100, scanInfo, older, newer));
+    assertEquals(Collections.emptyList(), scanAt(3000, scanInfo, older, newer));
+  }
+
+  @Test
+  public void testScanNowAttributeAppliesToCellTtl() throws IOException {
+    KeyValue longLived =
+      new KeyValue(Bytes.toBytes("R1"), CF, Bytes.toBytes("q"), 1000, Bytes.toBytes("A"),
+        new Tag[] { new ArrayBackedTag(TagType.TTL_TAG_TYPE, Bytes.toBytes(10000L)) });
+    KeyValue shortLived =
+      new KeyValue(Bytes.toBytes("R1"), CF, Bytes.toBytes("q"), 2000, Bytes.toBytes("B"),
+        new Tag[] { new ArrayBackedTag(TagType.TTL_TAG_TYPE, Bytes.toBytes(1000L)) });
+    ScanInfo scanInfo = new ScanInfo(CONF, CF, 0, 1, Long.MAX_VALUE, KeepDeletedCells.FALSE,
+      HConstants.DEFAULT_BLOCKSIZE, 0, CellComparator.getInstance(), false);
+
+    assertEquals(Collections.singletonList(shortLived),
+      scanAt(2500, scanInfo, longLived, shortLived));
+    assertEquals(Collections.singletonList(longLived),
+      scanAt(5000, scanInfo, longLived, shortLived));
+    assertEquals(Collections.emptyList(), scanAt(12000, scanInfo, longLived, shortLived));
+  }
+
+  @Test
+  public void testScanNowAttributeIgnoredInRpcContext() throws IOException {
+    KeyValue older = create("R1", "cf", "a", 1000, KeyValue.Type.Put, "dont-care");
+    KeyValue newer = create("R1", "cf", "b", 2000, KeyValue.Type.Put, "dont-care");
+    ScanInfo scanInfo = new ScanInfo(CONF, CF, 0, 1, 500, KeepDeletedCells.FALSE,
+      HConstants.DEFAULT_BLOCKSIZE, 0, CellComparator.getInstance(), false);
+
+    RpcServer.setCurrentCall(Mockito.mock(RpcCall.class));
+    try {
+      assertEquals(Collections.emptyList(), scanAt(2100, scanInfo, older, newer));
+    } finally {
+      RpcServer.unsetCurrentCall();
+    }
+  }
+
+  private static List<Cell> scanAt(long now, ScanInfo scanInfo, KeyValue... kvs)
+    throws IOException {
+    Scan scan = new Scan();
+    scan.setAttribute(StoreScanner.HUBSPOT_SNAPSHOT_SCAN_NOW_ATTRIBUTE, Bytes.toBytes(now));
+    List<Cell> results = new ArrayList<>();
+    try (StoreScanner scanner = new StoreScanner(scan, scanInfo, null, scanFixture(kvs))) {
+      List<Cell> row = new ArrayList<>();
+      boolean more;
+      do {
+        more = scanner.next(row);
+        results.addAll(row);
+        row.clear();
+      } while (more);
+    }
+    return results;
   }
 
   @Test

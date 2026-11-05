@@ -744,6 +744,7 @@ public class AssignmentManager {
     if (!regionNode.isInState(expectedStates)) {
       throw new DoNotRetryRegionException(UNEXPECTED_STATE_REGION + regionNode);
     }
+
     if (isTableDisabled(regionNode.getTable())) {
       throw new DoNotRetryIOException(regionNode.getTable() + " is disabled for " + regionNode);
     }
@@ -762,6 +763,10 @@ public class AssignmentManager {
     RegionStateNode regionNode = regionStates.getOrCreateRegionStateNode(regionInfo);
     regionNode.lock();
     try {
+      if (regionNode.isSplit()) {
+        throw new DoNotRetryRegionException(regionNode.getRegionInfo().getEncodedName()
+          + " is a split parent and cannot be assigned");
+      }
       if (override) {
         if (regionNode.getProcedure() != null) {
           regionNode.unsetProcedure(regionNode.getProcedure());
