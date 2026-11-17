@@ -19,6 +19,20 @@ before:
   - description: "Prepare build environment"
     commands:
       - $WORKSPACE/build-scripts/prepare_environment.sh
+  - description: "Set canonical Maven versions"
+    commands:
+      - |
+          if [ "$GIT_BRANCH" = "hubspot-2.6" ]; then
+            if [ "${SET_VERSION:-}" != "2.6-hubspot-SNAPSHOT" ]; then
+              echo "Expected SET_VERSION=2.6-hubspot-SNAPSHOT after preparing the build environment" >&2
+              exit 1
+            fi
+            "$JAVA_BUILDSCRIPTS_DIR/set_maven_versions.py" \
+              --version "$SET_VERSION" \
+              --root "$WORKSPACE" \
+              --no-use-managed-versions \
+              --no-use-version-overrides
+          fi
 
 depends:
   - hbase
