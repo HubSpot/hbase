@@ -91,6 +91,14 @@ write-build-env-var REPO_NAME "$REPO_NAME"
 # with the expectations in VersionInfo.compareVersion().
 write-build-env-var MAVEN_BUILD_ARGS "$MAVEN_BUILD_ARGS -Dversioninfo.version=$HBASE_VERSION"
 
+if [[ "$GIT_BRANCH" = "$MAIN_BRANCH" && -n "${JAVA_BUILDSCRIPTS_DIR:-}" ]]; then
+    "$JAVA_BUILDSCRIPTS_DIR/set_maven_versions.py" \
+        --version "$SET_VERSION" \
+        --root "$WORKSPACE" \
+        --no-use-managed-versions \
+        --no-use-version-overrides
+fi
+
 echo "Building HBase version $HBASE_VERSION"
 echo "Will deploy to nexus with version $SET_VERSION"
 echo "Will create rpm with version $FULL_BUILD_VERSION"
