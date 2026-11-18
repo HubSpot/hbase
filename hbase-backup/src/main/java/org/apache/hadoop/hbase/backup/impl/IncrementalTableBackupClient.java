@@ -132,7 +132,6 @@ public class IncrementalTableBackupClient extends TableBackupClient {
       throw new IOException("Unable to get FileSystem", use);
     }
     Path rootdir = CommonFSUtils.getRootDir(conf);
-    Path tgtRoot = new Path(new Path(backupInfo.getBackupRootDir()), backupId);
 
     for (BulkLoad bulkLoad : bulkLoads) {
       TableName srcTable = bulkLoad.getTableName();
@@ -150,13 +149,6 @@ public class IncrementalTableBackupClient extends TableBackupClient {
       Path p = new Path(tblDir, regionName + Path.SEPARATOR + fam + Path.SEPARATOR + filename);
 
       String srcTableQualifier = srcTable.getQualifierAsString();
-      String srcTableNs = srcTable.getNamespaceAsString();
-      Path tgtFam = new Path(tgtRoot, srcTableNs + Path.SEPARATOR + srcTableQualifier
-        + Path.SEPARATOR + regionName + Path.SEPARATOR + fam);
-      if (!tgtFs.mkdirs(tgtFam)) {
-        throw new IOException("couldn't create " + tgtFam);
-      }
-      Path tgt = new Path(tgtFam, filename);
 
       Path archiveDir = HFileArchiveUtil.getStoreArchivePath(conf, srcTable, regionName, fam);
       Path archive = new Path(archiveDir, filename);
@@ -165,11 +157,11 @@ public class IncrementalTableBackupClient extends TableBackupClient {
         if (LOG.isTraceEnabled()) {
           LOG.trace("found bulk hfile {} in {} for {}", bulkLoad.getHfilePath(), p.getParent(),
             srcTableQualifier);
-          LOG.trace("copying {} to {}", p, tgt);
+          LOG.trace("copying {}", p);
         }
         bulkloadInfo.addActiveFile(p.toString());
       } else if (fs.exists(archive)) {
-        LOG.debug("copying archive {} to {}", archive, tgt);
+        LOG.debug("copying archive {}", archive);
         bulkloadInfo.addArchiveFiles(archive.toString());
       }
     }
