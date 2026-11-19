@@ -37,6 +37,9 @@ name: Yetus JDK17 Hadoop3 Compile Check
       prerelease:
         type: boolean
         default: false
+      bootstrap:
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -62,10 +65,13 @@ jobs:
       - name: Checkout pinned CI tools
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          repository: apache/hbase
-          ref: ${{ inputs.base_sha }}
+          repository: ${{ inputs.bootstrap && inputs.head_repository || 'apache/hbase' }}
+          ref: ${{ inputs.bootstrap && inputs.head_sha || inputs.base_sha }}
           path: ci-tools
-          sparse-checkout: dev-support/fork_ci.py
+          sparse-checkout: |
+            dev-support/fork_ci.py
+            dev-support/jenkins_precommit_github_yetus.sh
+            dev-support/yetus_console_to_md.py
           sparse-checkout-cone-mode: false
           persist-credentials: false
 
@@ -157,13 +163,13 @@ jobs:
           DEBUG: 'true'
         run: |
           cd "${{ github.workspace }}"
-          bash src/dev-support/jenkins_precommit_github_yetus.sh
+          bash ci-tools/dev-support/jenkins_precommit_github_yetus.sh
 
       - name: Publish Job Summary
-        if: always()
+        if: ${{ always() && hashFiles('yetus-jdk17-hadoop3-compile-check/output/**') != '' }}
         run: |
           cd "${{ github.workspace }}"
-          python3 src/dev-support/yetus_console_to_md.py yetus-jdk17-hadoop3-compile-check/output >> $GITHUB_STEP_SUMMARY
+          python3 ci-tools/dev-support/yetus_console_to_md.py yetus-jdk17-hadoop3-compile-check/output >> $GITHUB_STEP_SUMMARY
 
       - name: Publish Results
         if: always()

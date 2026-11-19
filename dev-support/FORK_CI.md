@@ -91,6 +91,23 @@ base does not verify the updated CI definitions.
 
 ## Maintain the workflows
 
+### Test the migration before it merges
+
+If the pinned upstream base does not contain `dev-support/fork_ci.py`, the workflow
+automatically uses bootstrap mode. It checks out the helper, Yetus launcher, and
+summary formatter from the branch's exact head commit into `ci-tools`, separate
+from `src`. The launcher remains available after patch preparation checks out the
+upstream base in `src`, so Yetus still receives the local patch and pinned-base
+arguments. The build token remains read-only.
+
+Bootstrap runs have a ` [bootstrap]` suffix on their tested-base job. They are for
+pre-merge feedback and cannot satisfy the upstream `Yetus CI` status. Once the
+helper exists on the selected upstream base, a new run automatically uses pinned
+upstream tooling. Permission errors, rate limits, and server errors do not enable
+bootstrap mode.
+
+### Update routing and reporting
+
 [`yetus.yml`](../.github/workflows/yetus.yml) owns triggers, routing, and the pinned
 test context. The three
 `yetus-*-check.yml` workflows are reusable implementations. Keep `REQUIRED_JOBS` in

@@ -169,6 +169,40 @@ class ContextTest(unittest.TestCase):
                 self.resolve(**changes)
 
 
+class BootstrapTest(unittest.TestCase):
+    def test_existing_helper_keeps_upstream_tooling(self):
+        api = Mock()
+        api.request.return_value = {"type": "file"}
+        self.assertFalse(ci.bootstrap_required(api, BASE))
+        api.request.assert_called_once_with(
+            "repos/apache/hbase/contents/dev-support/fork_ci.py", ref=BASE)
+
+    def test_absent_helper_enables_branch_tooling(self):
+        api = Mock()
+        error = HTTPError("url", 404, "Not Found", {}, None)
+        self.addCleanup(error.close)
+        api.request.side_effect = error
+        self.assertTrue(ci.bootstrap_required(api, BASE))
+
+    def test_permission_rate_limit_and_server_errors_do_not_enable_bootstrap(self):
+        for code in (403, 429, 500):
+            with self.subTest(code=code):
+                api = Mock()
+                error = HTTPError("url", code, "API error", {}, None)
+                self.addCleanup(error.close)
+                api.request.side_effect = error
+                with self.assertRaises(HTTPError):
+                    ci.bootstrap_required(api, BASE)
+
+    def test_non_file_helper_and_invalid_commit_fail_closed(self):
+        api = Mock()
+        api.request.return_value = {"type": "symlink"}
+        with self.assertRaisesRegex(ValueError, "regular file"):
+            ci.bootstrap_required(api, BASE)
+        with self.assertRaisesRegex(ValueError, "full commit"):
+            ci.bootstrap_required(api, "master")
+
+
 class EvaluationTest(unittest.TestCase):
     def setUp(self):
         self.pr = pull_request()
@@ -201,6 +235,14 @@ class EvaluationTest(unittest.TestCase):
         state, _, url = self.evaluate()
         self.assertEqual(state, "success")
         self.assertEqual(url, f"https://github.com/{FORK}/actions/runs/42")
+
+    def test_bootstrap_run_cannot_satisfy_the_upstream_status(self):
+        for job in self.jobs:
+            if job["name"] == ci.marker(self.pr):
+                job["name"] += " [bootstrap]"
+        state, description, _ = self.evaluate()
+        self.assertEqual(state, "pending")
+        self.assertIn("Bootstrap", description)
 
     def test_wrong_workflow_event_head_repository_or_branch_is_ignored(self):
         for field, value in (
@@ -610,6 +652,19 @@ printf '%s\\n' "$PATCH_BRANCH" "$GITHUB_EVENT_NAME" "$ROBOTTYPE" "$BUILD_URL" \\
         self.env["YETUS_BASE_SHA"] = BASE
         self.patch.unlink()
         self.assertNotEqual(self.invoke().returncode, 0)
+
+    def test_preserved_launcher_works_when_source_base_has_no_patch_aware_launcher(self):
+        tools = self.wrapper.parents[2] / "ci-tools" / "dev-support"
+        tools.mkdir(parents=True)
+        launcher = tools / self.wrapper.name
+        shutil.copyfile(self.wrapper, launcher)
+        self.wrapper.write_text("exit 99\n")
+        self.wrapper = launcher
+        result = self.invoke()
+        self.assertEqual(result.returncode, 0, result.stderr.decode())
+        args = self.capture.read_text().splitlines()
+        self.assertIn("--git-offline", args)
+        self.assertEqual(args[-1], str(self.patch))
 
     def test_jenkins_arguments_are_unchanged(self):
         self.env.update(GITHUB_ACTIONS="false", YETUS_LOCAL_PATCH="", BUILD_URL_ARTIFACTS="url")

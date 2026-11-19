@@ -49,6 +49,7 @@ jobs:
       base_sha: ${{ steps.context.outputs.base_sha }}
       base_ref: ${{ steps.context.outputs.base_ref }}
       prerelease: ${{ steps.context.outputs.prerelease }}
+      bootstrap: ${{ steps.context.outputs.bootstrap }}
     steps:
       - name: Checkout CI tools
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -63,7 +64,7 @@ jobs:
         run: python3 dev-support/fork_ci.py context
 
   tested-base:
-    name: Tested base ${{ needs.context.outputs.base_sha }} for ${{ needs.context.outputs.base_ref }} (prerelease=${{ needs.context.outputs.prerelease }})
+    name: Tested base ${{ needs.context.outputs.base_sha }} for ${{ needs.context.outputs.base_ref }} (prerelease=${{ needs.context.outputs.prerelease }})${{ needs.context.outputs.bootstrap == 'true' && ' [bootstrap]' || '' }}
     needs: context
     runs-on: ubuntu-latest
     timeout-minutes: 1
@@ -82,6 +83,7 @@ jobs:
       base_sha: ${{ needs.context.outputs.base_sha }}
       base_ref: ${{ needs.context.outputs.base_ref }}
       prerelease: ${{ needs.context.outputs.prerelease == 'true' }}
+      bootstrap: ${{ needs.context.outputs.bootstrap == 'true' }}
 
   compile:
     name: Compile
@@ -94,6 +96,7 @@ jobs:
       base_sha: ${{ needs.context.outputs.base_sha }}
       base_ref: ${{ needs.context.outputs.base_ref }}
       prerelease: ${{ needs.context.outputs.prerelease == 'true' }}
+      bootstrap: ${{ needs.context.outputs.bootstrap == 'true' }}
 
   unit:
     name: Unit
@@ -106,3 +109,4 @@ jobs:
       base_sha: ${{ needs.context.outputs.base_sha }}
       base_ref: ${{ needs.context.outputs.base_ref }}
       prerelease: ${{ needs.context.outputs.prerelease == 'true' }}
+      bootstrap: ${{ needs.context.outputs.bootstrap == 'true' }}

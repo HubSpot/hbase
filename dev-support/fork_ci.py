@@ -177,6 +177,21 @@ def git(source, *args):
     return subprocess.check_output(["git", "-C", str(source), *args], text=True).strip()
 
 
+def bootstrap_required(api, base_sha):
+    """Use branch tooling only when the pinned upstream base predates the CI helper."""
+    try:
+        helper = api.request(f"repos/{UPSTREAM}/contents/dev-support/fork_ci.py",
+                             ref=commit(base_sha))
+    except HTTPError as error:
+        if error.code != 404:
+            raise
+        error.close()
+        return True
+    if helper.get("type") != "file":
+        raise ValueError("The upstream CI helper must be a regular file")
+    return False
+
+
 def prepare_patch(source, patch, base_sha, head_sha, upstream_url=None):
     """Diff the clean merge against its pinned base, then let Yetus apply that patch."""
     commit(base_sha)
@@ -295,6 +310,8 @@ def evaluate(api, pr, previous=None):
     jobs = list(api.pages(
         f"repos/{repo}/actions/runs/{run['id']}/attempts/{run['run_attempt']}/jobs", "jobs"
     ))
+    if any(job["name"] == marker(pr) + " [bootstrap]" for job in jobs):
+        return "pending", "Bootstrap run; upstream CI tooling must be merged before verification", url
     required = REQUIRED_JOBS | {marker(pr)}
     passed = {job["name"] for job in jobs if job["conclusion"] == "success"}
     if not required <= passed:
@@ -375,6 +392,10 @@ def main():
         context = resolve_context(api, os.environ["GITHUB_EVENT_NAME"], event,
                                   os.environ["GITHUB_REPOSITORY"], os.environ["GITHUB_SHA"],
                                   os.environ["GITHUB_REF"])
+        context["bootstrap"] = str(bootstrap_required(api, context["base_sha"])).lower()
+        if context["bootstrap"] == "true":
+            print("Bootstrap CI: using read-only tooling from the branch; "
+                  "this run cannot satisfy the upstream Yetus CI status")
         with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
             for key, value in context.items():
                 if "\n" in value or "\r" in value:
