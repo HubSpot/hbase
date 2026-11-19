@@ -1,0 +1,108 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+---
+name: Yetus
+
+"on":
+  push:
+    branches: ['**']
+  pull_request:
+    branches: [master]
+    types: [opened, synchronize, reopened, labeled, unlabeled, edited]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: yetus-${{ github.event.pull_request.number || github.ref }}-${{ github.event_name }}
+  cancel-in-progress: true
+
+jobs:
+  context:
+    name: Resolve CI context
+    # Forks build on push. Upstream only builds its own PRs or an explicit maintainer opt-in.
+    if: >-
+      (github.repository != 'apache/hbase' && github.event_name != 'pull_request') ||
+      (github.repository == 'apache/hbase' && github.event_name == 'pull_request' &&
+       (github.event.pull_request.head.repo.full_name == 'apache/hbase' ||
+        contains(github.event.pull_request.labels.*.name, 'use project ci')))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      head_repository: ${{ steps.context.outputs.head_repository }}
+      head_sha: ${{ steps.context.outputs.head_sha }}
+      base_sha: ${{ steps.context.outputs.base_sha }}
+      base_ref: ${{ steps.context.outputs.base_ref }}
+      prerelease: ${{ steps.context.outputs.prerelease }}
+    steps:
+      - name: Checkout CI tools
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Test CI tools
+        run: python3 -m unittest discover -s dev-support -p test_fork_ci.py
+      - name: Resolve upstream target and labels
+        id: context
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 dev-support/fork_ci.py context
+
+  tested-base:
+    name: Tested base ${{ needs.context.outputs.base_sha }} for ${{ needs.context.outputs.base_ref }} (prerelease=${{ needs.context.outputs.prerelease }})
+    needs: context
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      # The trusted monitor reads this job's name through the Jobs API, not a fork artifact.
+      - run: echo 'Each Yetus job tests a patch against this pinned upstream base.'
+
+  general:
+    name: General
+    needs: context
+    if: needs.context.outputs.head_sha != needs.context.outputs.base_sha
+    uses: ./.github/workflows/yetus-general-check.yml
+    with:
+      head_repository: ${{ needs.context.outputs.head_repository }}
+      head_sha: ${{ needs.context.outputs.head_sha }}
+      base_sha: ${{ needs.context.outputs.base_sha }}
+      base_ref: ${{ needs.context.outputs.base_ref }}
+      prerelease: ${{ needs.context.outputs.prerelease == 'true' }}
+
+  compile:
+    name: Compile
+    needs: context
+    if: needs.context.outputs.head_sha != needs.context.outputs.base_sha
+    uses: ./.github/workflows/yetus-jdk17-hadoop3-compile-check.yml
+    with:
+      head_repository: ${{ needs.context.outputs.head_repository }}
+      head_sha: ${{ needs.context.outputs.head_sha }}
+      base_sha: ${{ needs.context.outputs.base_sha }}
+      base_ref: ${{ needs.context.outputs.base_ref }}
+      prerelease: ${{ needs.context.outputs.prerelease == 'true' }}
+
+  unit:
+    name: Unit
+    needs: context
+    if: needs.context.outputs.head_sha != needs.context.outputs.base_sha
+    uses: ./.github/workflows/yetus-jdk17-hadoop3-unit-check.yml
+    with:
+      head_repository: ${{ needs.context.outputs.head_repository }}
+      head_sha: ${{ needs.context.outputs.head_sha }}
+      base_sha: ${{ needs.context.outputs.base_sha }}
+      base_ref: ${{ needs.context.outputs.base_ref }}
+      prerelease: ${{ needs.context.outputs.prerelease == 'true' }}

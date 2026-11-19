@@ -36,6 +36,9 @@ configurations in this directory:
 - `jenkinsEnv.sh`, `jenkins-scripts/` -- Shared Jenkins environment setup
 - `HOW_TO_YETUS_LOCAL.md` -- Guide for running Yetus checks locally
 
+For PRs to `master`, [enable CI in your fork](FORK_CI.md). The upstream monitor
+reports the fork's result as the `Yetus CI` commit status.
+
 ## Release Automation
 
 - `create-release/` -- Docker-based release candidate builder (tags, builds,

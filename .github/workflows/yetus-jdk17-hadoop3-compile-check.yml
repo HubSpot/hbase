@@ -20,12 +20,26 @@
 name: Yetus JDK17 Hadoop3 Compile Check
 
 "on":
-  pull_request:
-    types: [opened, synchronize, reopened, labeled, unlabeled]
+  workflow_call:
+    inputs:
+      head_repository:
+        type: string
+        required: true
+      head_sha:
+        type: string
+        required: true
+      base_sha:
+        type: string
+        required: true
+      base_ref:
+        type: string
+        required: true
+      prerelease:
+        type: boolean
+        default: false
 
 permissions:
   contents: read
-  statuses: write
 
 jobs:
   jdk17-hadoop3-compile-check:
@@ -39,9 +53,27 @@ jobs:
       - name: Checkout HBase
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          repository: ${{ inputs.head_repository }}
+          ref: ${{ inputs.head_sha }}
           path: src
           fetch-depth: 0
           persist-credentials: false
+
+      - name: Checkout pinned CI tools
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: apache/hbase
+          ref: ${{ inputs.base_sha }}
+          path: ci-tools
+          sparse-checkout: dev-support/fork_ci.py
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      - name: Prepare patch against upstream
+        env:
+          CI_BASE_SHA: ${{ inputs.base_sha }}
+          CI_HEAD_SHA: ${{ inputs.head_sha }}
+        run: python3 ci-tools/dev-support/fork_ci.py prepare
 
       - name: Set up JDK 17
         uses: actions/setup-java@ad2b38190b15e4d6bdf0c97fb4fca8412226d287 # v5.3.0
@@ -58,7 +90,7 @@ jobs:
             hbase-m2-
 
       - name: Download Yetus (pinned release)
-        if: ${{ !contains(github.event.pull_request.labels.*.name, 'test-yetus-prerelease') }}
+        if: ${{ !inputs.prerelease }}
         run: |
           mkdir -p yetus
           cd yetus
@@ -71,14 +103,14 @@ jobs:
           rm apache-yetus-${{ env.YETUS_VERSION }}-bin.tar.gz
 
       - name: Set up JDK 21 (prerelease, build-only)
-        if: ${{ contains(github.event.pull_request.labels.*.name, 'test-yetus-prerelease') }}
+        if: inputs.prerelease
         uses: actions/setup-java@ad2b38190b15e4d6bdf0c97fb4fca8412226d287 # v5.3.0
         with:
           java-version: '21'
           distribution: 'temurin'
 
       - name: Checkout apache/yetus@HEAD (prerelease)
-        if: ${{ contains(github.event.pull_request.labels.*.name, 'test-yetus-prerelease') }}
+        if: inputs.prerelease
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: apache/yetus
@@ -86,7 +118,7 @@ jobs:
           persist-credentials: false
 
       - name: Build Yetus from source (prerelease)
-        if: ${{ contains(github.event.pull_request.labels.*.name, 'test-yetus-prerelease') }}
+        if: inputs.prerelease
         run: |
           set -euo pipefail
           YETUS_SHA="$(git -C yetus-src rev-parse HEAD)"
@@ -118,7 +150,9 @@ jobs:
           BLANKS_EOL_IGNORE_FILE: "dev-support/blanks-eol-ignore.txt"
           BLANKS_TABS_IGNORE_FILE: "dev-support/blanks-tabs-ignore.txt"
           BUILD_THREAD: "4"
-          BRANCH_NAME: "${{ github.base_ref }}"
+          BRANCH_NAME: "${{ inputs.base_ref }}"
+          YETUS_BASE_SHA: ${{ inputs.base_sha }}
+          YETUS_LOCAL_PATCH: ${{ runner.temp }}/hbase-ci.patch
           SKIP_ERRORPRONE: 'true'
           DEBUG: 'true'
         run: |

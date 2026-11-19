@@ -115,7 +115,12 @@ if [[ -n "${BUILD_URL_ARTIFACTS}" ]]; then
   YETUS_ARGS+=("--build-url-artifacts=${BUILD_URL_ARTIFACTS}")
 fi
 # plugins to enable
-YETUS_ARGS+=("--plugins=${PLUGINS},-findbugs")
+if [[ -n "${YETUS_LOCAL_PATCH}" ]]; then
+  # The upstream monitor publishes the result; build jobs do not write GitHub statuses.
+  YETUS_ARGS+=("--plugins=${PLUGINS},-findbugs,-github")
+else
+  YETUS_ARGS+=("--plugins=${PLUGINS},-findbugs")
+fi
 # run in docker mode and specifically point to our
 # Dockerfile since we don't want to use the auto-pulled version.
 YETUS_ARGS+=("--docker")
@@ -173,7 +178,24 @@ if [[ -n "${TEST_PROFILE}" ]]; then
   YETUS_ARGS+=("--test-profile=${TEST_PROFILE}")
 fi
 
+if [[ -n "${YETUS_LOCAL_PATCH}" ]]; then
+  if [[ ! "${YETUS_BASE_SHA}" =~ ^[0-9a-f]{40}$ || ! -f "${YETUS_LOCAL_PATCH}" ]]; then
+    echo "[ERROR] A local CI patch requires a pinned upstream base and an existing patch file."
+    exit 1
+  fi
+  # A positional patch keeps Yetus in patch mode even when the Actions event is push.
+  # Offline git operations keep every test partition on the same upstream commit.
+  YETUS_ARGS+=("--git-offline" "--branch=${YETUS_BASE_SHA}")
+  YETUS_ARGS+=("--branch-default=${YETUS_BASE_SHA}" "${YETUS_LOCAL_PATCH}")
+fi
+
 echo "Launching yetus with command line:"
 echo "${TESTPATCHBIN} ${YETUS_ARGS[*]}"
 
-/usr/bin/env bash "${TESTPATCHBIN}" "${YETUS_ARGS[@]}"
+if [[ "${GITHUB_ACTIONS}" == "true" && -n "${YETUS_LOCAL_PATCH}" ]]; then
+  # Yetus applies GitHub event defaults after parsing --branch. A neutral event keeps
+  # the explicit local-patch base on both the host and Docker re-execution.
+  GITHUB_EVENT_NAME=workflow_dispatch /usr/bin/env bash "${TESTPATCHBIN}" "${YETUS_ARGS[@]}"
+else
+  /usr/bin/env bash "${TESTPATCHBIN}" "${YETUS_ARGS[@]}"
+fi
