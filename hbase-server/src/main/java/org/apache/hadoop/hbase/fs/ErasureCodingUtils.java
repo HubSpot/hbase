@@ -47,11 +47,14 @@ public final class ErasureCodingUtils {
   private static final Logger LOG = LoggerFactory.getLogger(ErasureCodingUtils.class);
 
   /**
-   * Runs checks against the FileSystem, verifying that HDFS is supported and the policy is
-   * available, enabled, and works with a simple write.
+   * Runs checks against HDFS, verifying that the policy is available, enabled, and works with a
+   * simple write. Skips validation on filesystems that do not support erasure coding.
    */
   public static void verifySupport(Configuration conf, String policy) throws HBaseIOException {
     DistributedFileSystem dfs = getDfs(conf);
+    if (dfs == null) {
+      return;
+    }
     checkAvailable(dfs, policy);
 
     // Enable the policy on a test directory. Try writing ot it to ensure that HDFS allows it
@@ -179,18 +182,25 @@ public final class ErasureCodingUtils {
   }
 
   /**
-   * Sets the EC policy on the path
+   * Sets the EC policy on the path, or does nothing if the filesystem does not support it.
    */
   public static void setPolicy(FileSystem fs, Path path, String policy) throws IOException {
-    callDfsMethod(getDfs(fs), "setErasureCodingPolicy", path, policy);
+    DistributedFileSystem dfs = getDfs(fs);
+    if (dfs != null) {
+      callDfsMethod(dfs, "setErasureCodingPolicy", path, policy);
+    }
   }
 
   /**
-   * Unsets any EC policy specified on the path.
+   * Unsets any EC policy specified on the path, or does nothing if the filesystem does not support
+   * it.
    */
   public static void unsetPolicy(FileSystem fs, Path rootDir, TableName tableName)
     throws IOException {
     DistributedFileSystem dfs = getDfs(fs);
+    if (dfs == null) {
+      return;
+    }
     Path path = CommonFSUtils.getTableDir(rootDir, tableName);
     if (getPolicyNameForPath(dfs, path) == null) {
       LOG.warn("No EC policy set for path {}, nothing to unset", path);
@@ -200,25 +210,26 @@ public final class ErasureCodingUtils {
   }
 
   public static void enablePolicy(FileSystem fs, String policy) throws IOException {
-    callDfsMethod(getDfs(fs), "enableErasureCodingPolicy", policy);
+    DistributedFileSystem dfs = getDfs(fs);
+    if (dfs != null) {
+      callDfsMethod(dfs, "enableErasureCodingPolicy", policy);
+    }
   }
 
   private static DistributedFileSystem getDfs(Configuration conf) throws HBaseIOException {
     try {
       return getDfs(FileSystem.get(conf));
-    } catch (DoNotRetryIOException e) {
-      throw e;
     } catch (IOException e) {
       throw new HBaseIOException("Failed to get FileSystem from conf", e);
     }
 
   }
 
-  private static DistributedFileSystem getDfs(FileSystem fs) throws DoNotRetryIOException {
+  private static DistributedFileSystem getDfs(FileSystem fs) {
     if (!(fs instanceof DistributedFileSystem)) {
-      throw new DoNotRetryIOException(
-        "Cannot manage Erasure Coding policy. Erasure Coding is only available on HDFS, but fs is "
-          + fs.getClass().getSimpleName());
+      LOG.warn("Skipping Erasure Coding policy management for unsupported filesystem {}",
+        fs.getClass().getSimpleName());
+      return null;
     }
     return (DistributedFileSystem) fs;
   }

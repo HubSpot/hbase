@@ -21,6 +21,7 @@ import static org.junit.Assert.assertThrows;
 
 import java.io.IOException;
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.hbase.DoNotRetryIOException;
 import org.apache.hadoop.hbase.HBaseClassTestRule;
 import org.apache.hadoop.hbase.TableName;
@@ -38,6 +39,17 @@ public class TestTableDescriptorChecker {
   @ClassRule
   public static final HBaseClassTestRule CLASS_RULE =
     HBaseClassTestRule.forClass(TestTableDescriptorChecker.class);
+
+  @Test
+  public void testErasureCodingOnLocalFileSystem() throws IOException {
+    Configuration conf = new Configuration();
+    FileSystem.setDefaultUri(conf, "file:///");
+    conf.setBoolean(TableDescriptorChecker.TABLE_SANITY_CHECKS, true);
+    TableDescriptorBuilder builder = TableDescriptorBuilder.newBuilder(TableName.valueOf("test"))
+      .setColumnFamily(ColumnFamilyDescriptorBuilder.of("cf"))
+      .setErasureCodingPolicy("XOR-2-1-1024k");
+    TableDescriptorChecker.sanityCheck(conf, builder.build());
+  }
 
   @Test
   public void testSanityCheck() throws IOException {
